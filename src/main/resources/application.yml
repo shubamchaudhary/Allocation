@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: allocation-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/warehouse
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+llm:
+  provider: openai
+  api-key: ${LLM_API_KEY:your-default-api-key}
+  model: gpt-4-turbo
+  max-tokens: 2048
+  temperature: 0.7
+
+logging:
+  level:
+    root: INFO
+    com.warehouse.allocation: DEBUG
+    org.springframework: INFO
+    org.hibernate: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/allocation-service.log
+
+security:
+  jwt:
+    secret-key: ${JWT_SECRET:VerySecretKeyForJWTTokenGenerationThatShouldBeChangedInProduction}
+    expiration-time: 86400000 # 24 hours
