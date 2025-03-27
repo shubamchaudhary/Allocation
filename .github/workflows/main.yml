@@ -1,0 +1,185 @@
+name: ALM Allocation Import/Export
+run-name: Allocation Import/Export for ${{ inputs.environment_name }} - ${{ inputs.operation_type }}
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: "Specify which environment to use"
+        required: true
+        type: environment
+      operation_type:
+        description: "Specify operation type"
+        required: true
+        type: choice
+        options:
+          - export
+          - import
+      planning_instance_id:
+        description: "Planning Instance ID (required for import)"
+        required: false
+        type: string
+      source_environment:
+        description: "Source environment to export from (for import operations)"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      environment_name:
+        description: "Specify which environment to use"
+        required: true
+        type: string
+      operation_type:
+        description: "Specify operation type (export/import)"
+        required: true
+        type: string
+      planning_instance_id:
+        description: "Planning Instance ID (required for import)"
+        required: false
+        type: string
+      source_environment:
+        description: "Source environment to export from (for import operations)"
+        required: false
+        type: string
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  Allocation_Export_Import:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+      
+      - name: Check out Realm Repository
+        uses: ./.github/actions/checkout_realm_repository
+        with:
+          automation_token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
+      
+      - name: Setting up BY Script
+        uses: ./.github/actions/setup_by_script
+      
+      - name: Setting up Credential Files
+        uses: ./.github/actions/setup_credential_files
+        with:
+          snowflake_private_key: ${{ secrets.SNOWFLAKE_SECURITY_ADMIN_PRIVATE_KEY }}
+          snowflake_environment: ${{ secrets.SNOWFLAKE_SECURITY_ADMIN_CONTEXT }}
+          realm_credential: ${{ secrets.REALM_INFO }}
+      
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3.13.0
+        with:
+          distribution: "temurin"
+          java-version: "17"
+      
+      - name: Export Allocation Data
+        if: ${{ inputs.operation_type == 'export' }}
+        run: |
+          # Get token for API access
+          $realmInfo = Get-Content realms/${{ inputs.environment_name }}/realm_info/realm_info.json | ConvertFrom-Json
+          $baseUrl = $realmInfo.api_url
+          
+          # Get authentication token
+          $token = (Get-AuthToken -RealmCredentialPath realm_credential.json).access_token
+          
+          # Make API call to export data
+          $exportUrl = "$baseUrl/calloc/api/v1/allocation/export"
+          $headers = @{
+            "Authorization" = "Bearer $token"
+          }
+          
+          Write-Host "Exporting allocation data from $exportUrl"
+          $tempFile = "allocation_data_${{ inputs.environment_name }}.zip"
+          
+          try {
+            Invoke-RestMethod -Uri $exportUrl -Headers $headers -Method GET -OutFile $tempFile
+            
+            if (Test-Path $tempFile) {
+              # Create directory for storage
+              $exportDir = "realms/${{ inputs.environment_name }}/allocation_export"
+              if (!(Test-Path $exportDir)) {
+                New-Item -ItemType Directory -Path $exportDir -Force
+              }
+              
+              # Move the file to the export directory
+              Move-Item -Path $tempFile -Destination "$exportDir/allocation_data.zip" -Force
+              
+              Write-Host "Allocation data successfully exported to $exportDir/allocation_data.zip"
+            } else {
+              Write-Error "Export file was not created"
+              exit 1
+            }
+          } catch {
+            Write-Error "Export failed: $_"
+            Write-Error "Status code: $($_.Exception.Response.StatusCode.value__)"
+            exit 1
+          }
+      
+      - name: Import Allocation Data
+        if: ${{ inputs.operation_type == 'import' }}
+        run: |
+          # Validate planning instance ID is provided
+          if ([string]::IsNullOrEmpty('${{ inputs.planning_instance_id }}')) {
+            Write-Error "Planning Instance ID is required for import operation"
+            exit 1
+          }
+          
+          # Validate source environment is provided
+          if ([string]::IsNullOrEmpty('${{ inputs.source_environment }}')) {
+            Write-Error "Source environment is required for import operation"
+            exit 1
+          }
+          
+          # Get realm info for target environment
+          $realmInfo = Get-Content realms/${{ inputs.environment_name }}/realm_info/realm_info.json | ConvertFrom-Json
+          $baseUrl = $realmInfo.api_url
+          
+          # Get authentication token
+          $token = (Get-AuthToken -RealmCredentialPath realm_credential.json).access_token
+          
+          # Check if export file exists in source environment
+          $exportPath = "realms/${{ inputs.source_environment }}/allocation_export/allocation_data.zip"
+          if (!(Test-Path $exportPath)) {
+            Write-Error "Export file not found at $exportPath. Please run an export first."
+            exit 1
+          }
+          
+          # Make API call to import data
+          $importUrl = "$baseUrl/calloc/api/v1/allocation/import?planningInstanceId=${{ inputs.planning_instance_id }}"
+          $headers = @{
+            "Authorization" = "Bearer $token"
+          }
+          
+          Write-Host "Importing allocation data to $importUrl"
+          $form = @{
+            file = Get-Item -Path $exportPath
+          }
+          
+          try {
+            $response = Invoke-RestMethod -Uri $importUrl -Headers $headers -Method POST -Form $form
+            
+            # Check response status
+            if ($response.status -eq "SUCCESS") {
+              Write-Host "Allocation data successfully imported"
+            } else {
+              Write-Error "Import failed: $($response.message)"
+              exit 1
+            }
+          } catch {
+            Write-Error "Import request failed: $_"
+            Write-Error "Status code: $($_.Exception.Response.StatusCode.value__)"
+            exit 1
+          }
+      
+      - name: Commit and Push Changes (for Export)
+        if: ${{ inputs.operation_type == 'export' }}
+        run: |
+          cd realms
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add "${{ inputs.environment_name }}/allocation_export/allocation_data.zip"
+          git commit -m "Export allocation data for ${{ inputs.environment_name }}"
+          git push
+          Write-Host "Changes pushed to repository"
