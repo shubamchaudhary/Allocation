@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       environment_name:
-        description: "Specify which environment to use"
+        description: "Specify which environment to use (case insensitive)"
         required: true
-        type: environment
+        type: string
       operation_type:
         description: "Specify operation type"
         required: true
@@ -48,6 +48,7 @@ defaults:
 jobs:
   Allocation_Export_Import:
     runs-on: ubuntu-latest
+    # Using the environment name as provided, workflow will handle case insensitivity
     environment: ${{ inputs.environment_name }}
     steps:
       - name: Checkout
