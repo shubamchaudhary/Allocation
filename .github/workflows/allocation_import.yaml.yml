@@ -1,0 +1,159 @@
+name: Deploy Allocation Data
+run-name: Deploy Allocation Data for ${{ inputs.environment_name }}
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: "Specify which environment to use"
+        required: true
+        type: environment
+      source_realm:
+        description: "Source realm to get allocation data from"
+        required: true
+        type: string
+      target_realm:
+        description: "Target realm to deploy allocation data to"
+        required: true
+        type: string
+      planning_instance_id:
+        description: "Optional planning instance ID for ondemand data sources"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      environment_name:
+        description: "Specify which environment to use"
+        required: true
+        type: string
+      source_realm:
+        description: "Source realm to get allocation data from"
+        required: true
+        type: string
+      target_realm:
+        description: "Target realm to deploy allocation data to"
+        required: true
+        type: string
+      planning_instance_id:
+        description: "Optional planning instance ID for ondemand data sources"
+        required: false
+        type: string
+
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  Deploy_Allocation_Resources:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4.1.1
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3.13.0
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Check out Realm Repository
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: 'BY-Product-Development/plan-calloc-realms'
+          token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
+          path: 'realms-repo'
+
+      - name: Verify Source Realm Data
+        run: |
+          $sourcePath = "realms-repo/realms/${{ inputs.source_realm }}/allocation_export"
+          if (!(Test-Path $sourcePath)) {
+            Write-Error "Source allocation data not found for realm ${{ inputs.source_realm }}"
+            exit 1
+          }
+          
+          Write-Output "Source allocation data found for realm ${{ inputs.source_realm }}"
+          $files = Get-ChildItem -Path $sourcePath -Recurse -File
+          Write-Output "Found $($files.Count) files to import"
+
+      - name: Create Target Realm Directory
+        run: |
+          $targetPath = "realms-repo/realms/${{ inputs.target_realm }}"
+          if (!(Test-Path $targetPath)) {
+            New-Item -Path $targetPath -ItemType Directory -Force
+            Write-Output "Created target realm directory: $targetPath"
+          }
+          
+          if (!(Test-Path "$targetPath/realm_info")) {
+            New-Item -Path "$targetPath/realm_info" -ItemType Directory -Force
+            Write-Output "Created realm_info directory"
+          }
+
+      - name: Setup Target Realm Info
+        run: |
+          $realmInfoPath = "realms-repo/realms/${{ inputs.target_realm }}/realm_info/realm_info.json"
+          
+          if (!(Test-Path $realmInfoPath)) {
+            Write-Error "Target realm info file not found at $realmInfoPath"
+            exit 1
+          }
+          
+          $realmInfo = Get-Content $realmInfoPath | ConvertFrom-Json
+          Write-Output "Target Realm: $($realmInfo.realm_name), ID: $($realmInfo.realm_id)"
+
+      - name: Create Import Zip Package
+        run: |
+          $sourcePath = "realms-repo/realms/${{ inputs.source_realm }}/allocation_export"
+          $tempDir = "allocation-import-temp"
+          
+          # Create temp directory
+          New-Item -Path $tempDir -ItemType Directory -Force
+          
+          # Copy files to temp directory
+          Copy-Item -Path "$sourcePath/*" -Destination $tempDir -Recurse
+          
+          # Create zip file
+          Compress-Archive -Path "$tempDir/*" -DestinationPath "allocation-import.zip" -Force
+          
+          # Clean up temp directory
+          Remove-Item -Path $tempDir -Recurse -Force
+          
+          Write-Output "Created allocation import package at allocation-import.zip"
+
+      - name: Import Allocation Data
+        run: |
+          # Get realm credentials
+          $realmInfoPath = "realms-repo/realms/${{ inputs.target_realm }}/realm_info/realm_info.json"
+          $realmInfo = Get-Content $realmInfoPath | ConvertFrom-Json
+          
+          # Prepare optional planning instance ID parameter
+          $planningInstanceParam = ""
+          if ("${{ inputs.planning_instance_id }}" -ne "") {
+            $planningInstanceParam = "--form 'planningInstanceId=${{ inputs.planning_instance_id }}'"
+          }
+          
+          # Get service access token (implement your auth method here)
+          $token = "YOUR_ACCESS_TOKEN"  # Replace with actual token acquisition
+          
+          # Call the import API
+          $importResult = curl -X POST `
+            -H "Authorization: Bearer $token" `
+            --form "file=@allocation-import.zip" `
+            $planningInstanceParam `
+            "${{ secrets.SERVICE_BASE_URL }}/api/v1/allocation/import-db-records"
+          
+          # Parse and check results
+          Write-Output "Import result: $importResult"
+          
+          # Convert the JSON result to a PowerShell object
+          $importResultObj = $importResult | ConvertFrom-Json
+          
+          if ($importResultObj.status -ne "SUCCESS") {
+            Write-Error "Import failed: $($importResultObj.message)"
+            exit 1
+          }
+          
+          Write-Output "Allocation data successfully imported to realm ${{ inputs.target_realm }}"
+
+      - name: Verify Import Results
+        run: |
+          Write-Output "Allocation data has been deployed to realm ${{ inputs.target_realm }}"
+          Write-Output "Use the allocation service API to verify the data was imported correctly"
