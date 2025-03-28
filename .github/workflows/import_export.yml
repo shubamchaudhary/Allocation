@@ -1,0 +1,219 @@
+name: Combined Allocation Export and Import (Test Version)
+run-name: Test Allocation Export and Import from ${{ inputs.source_realm }} to ${{ inputs.target_realm }}
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - interop
+          - psr
+          - demo
+        default: dev
+      source_realm:
+        description: "Source realm to export data from"
+        required: true
+        type: string
+      target_realm:
+        description: "Target realm to import data to"
+        required: true
+        type: string
+      planningInstanceId:
+        description: "Planning instance ID"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  # First job - Export data from source realm
+  Export_Allocation_Resources:
+    runs-on: ubuntu-latest
+    outputs:
+      export_status: ${{ steps.export_result.outputs.status }}
+    steps:
+      - name: Echo Input Parameters
+        id: echo_input
+        run: |
+          Write-Output "Environment: [${{ inputs.environment }}]"
+          Write-Output "Source Realm: [${{ inputs.source_realm }}]"
+          Write-Output "Target Realm: [${{ inputs.target_realm }}]"
+          Write-Output "Planning Instance ID: [${{ inputs.planningInstanceId }}]"
+
+      - name: Check out repository code
+        uses: actions/checkout@v4.1.1
+
+      - name: Setup Testing Directory
+        id: setup_test_dir
+        run: |
+          New-Item -Force -Path "test-realms/${{ inputs.source_realm }}/allocation_export" -Type Directory 
+          Write-Output "Created folder structure for source realm ${{ inputs.source_realm }}"
+
+      - name: Mock Export Allocation Data
+        run: |
+          # Create mock data files
+          New-Item -Path "mock-data" -ItemType Directory -Force
+          
+          # Create sample allocation data files using PowerShell objects 
+          $allocData = @{
+            id = "alloc1"
+            name = "Test Allocation 1"
+            planningInstanceId = "${{ inputs.planningInstanceId }}"
+            status = "ACTIVE"
+          }
+          $allocJson = ConvertTo-Json $allocData -Depth 3
+          Set-Content -Path "mock-data/allocations.json" -Value $allocJson -Encoding UTF8
+          
+          $resData = @{
+            id = "res1"
+            name = "Resource 1"
+            type = "HUMAN"
+          }
+          $resJson = ConvertTo-Json $resData -Depth 3
+          Set-Content -Path "mock-data/resources.json" -Value $resJson -Encoding UTF8
+          
+          $mapData = @{
+            id = "map1"
+            allocationId = "alloc1"
+            resourceId = "res1"
+            percentage = 50
+          }
+          $mapJson = ConvertTo-Json $mapData -Depth 3
+          Set-Content -Path "mock-data/resource_maps.json" -Value $mapJson -Encoding UTF8
+          
+          # Create a zip file
+          Compress-Archive -Path "mock-data/*" -DestinationPath "exported-tables.zip" -Force
+          
+          # Verify the export file was created
+          if (!(Test-Path "exported-tables.zip")) {
+            Write-Error "Failed to create mock allocation data - exported-tables.zip not created"
+            exit 1
+          }
+          
+          Write-Output "Successfully created mock allocation data for realm ${{ inputs.source_realm }}"
+          
+          # Copy files to realm repository
+          Copy-Item -Force -Recurse "mock-data/*" -Destination "test-realms/${{ inputs.source_realm }}/allocation_export/"
+          
+          # Clean up
+          Remove-Item -Recurse -Force "mock-data"
+
+      - name: List Files Before Upload
+        run: |
+          Write-Output "Files in current directory:"
+          Get-ChildItem -Path "." | ForEach-Object { Write-Output "  $($_.Name)" }
+          
+          if (Test-Path "exported-tables.zip") {
+            Write-Output "Zip file details:"
+            Get-Item "exported-tables.zip" | Select-Object FullName, Length, LastWriteTime
+          } else {
+            Write-Error "exported-tables.zip file not found before upload!"
+          }
+
+      - name: Upload Exported Data as Artifact
+        uses: actions/upload-artifact@v4.1.0
+        with:
+          name: allocation-export-files
+          path: exported-tables.zip
+          retention-days: 1  # Short retention for testing
+
+      - name: Set Export Result
+        id: export_result
+        run: |
+          echo "status=success" >> $env:GITHUB_OUTPUT
+          Write-Output "Export completed successfully"
+
+  # Second job - Import data to target realm
+  Import_Allocation_Resources:
+    needs: Export_Allocation_Resources
+    if: needs.Export_Allocation_Resources.outputs.export_status == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Input Parameters
+        id: echo_input
+        run: |
+          Write-Output "Environment: [${{ inputs.environment }}]"
+          Write-Output "Source Realm: [${{ inputs.source_realm }}]"
+          Write-Output "Target Realm: [${{ inputs.target_realm }}]"
+          Write-Output "Planning Instance ID: [${{ inputs.planningInstanceId }}]"
+
+      - name: Check out repository code
+        uses: actions/checkout@v4.1.1
+
+      - name: Setup Testing Directory
+        run: |
+          $targetRealmPath = "test-realms/${{ inputs.target_realm }}"
+          if (!(Test-Path $targetRealmPath)) {
+            New-Item -Path $targetRealmPath -ItemType Directory -Force
+            Write-Output "Created target realm directory: $targetRealmPath"
+          }
+
+      - name: Download Allocation Export File
+        uses: actions/download-artifact@v4
+        with:
+          name: allocation-export-files
+          path: ./downloads/
+
+      - name: Check Downloaded Files
+        run: |
+          Write-Output "Checking downloaded files..."
+          
+          if (Test-Path "./downloads/exported-tables.zip") {
+            Write-Output "Found artifact exported-tables.zip"
+            Copy-Item "./downloads/exported-tables.zip" -Destination "allocation-import.zip" -Force
+          } else {
+            Write-Output "Contents of download directory:"
+            Get-ChildItem -Path "./downloads/" -Recurse | ForEach-Object { Write-Output "  $($_.Name)" }
+            Write-Error "Expected exported-tables.zip not found in downloads directory!"
+            exit 1
+          }
+
+      - name: Mock Import Allocation Data
+        run: |
+          # Create target directory if it doesn't exist
+          $targetDir = "test-realms/${{ inputs.target_realm }}/allocation_import"
+          New-Item -Path $targetDir -ItemType Directory -Force
+          
+          # Extract the zip file to the target directory
+          Expand-Archive -Path "allocation-import.zip" -DestinationPath $targetDir -Force
+          
+          # List the imported files
+          $importedFiles = Get-ChildItem -Path $targetDir -Recurse -File
+          Write-Output "Imported $($importedFiles.Count) files to target realm ${{ inputs.target_realm }}:"
+          
+          foreach ($file in $importedFiles) {
+            Write-Output "  - $($file.Name)"
+          }
+          
+          # Generate a mock import result using PowerShell objects
+          $importResult = @{
+            status = "SUCCESS"
+            message = "Mock import completed successfully"
+            itemsImported = $importedFiles.Count
+            targetRealm = "${{ inputs.target_realm }}"
+            planningInstanceId = "${{ inputs.planningInstanceId }}"
+          }
+          
+          $importResultJson = ConvertTo-Json $importResult -Depth 3
+          Set-Content -Path "import-result.json" -Value $importResultJson -Encoding UTF8
+          
+          Write-Output "Mock allocation data successfully imported to realm ${{ inputs.target_realm }}"
+
+      - name: Verify Import Results
+        run: |
+          if (Test-Path "import-result.json") {
+            $importResult = Get-Content "import-result.json" | ConvertFrom-Json
+            Write-Output "Import status: $($importResult.status)"
+            Write-Output "Message: $($importResult.message)"
+            Write-Output "Items imported: $($importResult.itemsImported)"
+          } else {
+            Write-Output "No import result file found"
+          }
+          
+          Write-Output "Allocation data has been deployed to test realm ${{ inputs.target_realm }}"
+          Write-Output "Files are located in test-realms/${{ inputs.target_realm }}/allocation_import"
