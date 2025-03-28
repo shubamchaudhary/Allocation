@@ -1,5 +1,5 @@
-name: Deploy Allocation Data
-run-name: Deploy Allocation Data for ${{ inputs.target_realm }}
+name: Deploy Allocation Data (Test Version)
+run-name: Test Deploy Allocation Data for ${{ inputs.target_realm }}
 on:
   workflow_dispatch:
     inputs:
@@ -50,7 +50,8 @@ defaults:
 jobs:
   Deploy_Allocation_Resources:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    # No actual environment needed for testing
+    # environment: ${{ inputs.environment }}
     steps:
       - name: Echo Input Parameters
         id: echo_input
@@ -63,25 +64,20 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4.1.1
 
-      - name: Setup Java JDK
-        uses: actions/setup-java@v3.13.0
-        with:
-          distribution: "temurin"
-          java-version: "17"
+      # Skipping JDK setup for test version
+      # - name: Setup Java JDK
+      #   uses: actions/setup-java@v3.13.0
+      #   with:
+      #     distribution: "temurin"
+      #     java-version: "17"
 
-      - name: Check out Realm Repository
-        uses: actions/checkout@v4.1.1
-        with:
-          repository: 'BY-Product-Development/plan-calloc-realms'
-          token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
-          path: 'realms-repo'
-
-      - name: Setup Realm Directory
+      # Using the current repository instead of a private one
+      - name: Setup Testing Directory
         run: |
-          $realmPath = "realms-repo/realms/${{ inputs.target_realm }}"
-          if (!(Test-Path $realmPath)) {
-            New-Item -Path $realmPath -ItemType Directory -Force
-            Write-Output "Created target realm directory: $realmPath"
+          $targetRealmPath = "test-realms/${{ inputs.target_realm }}"
+          if (!(Test-Path $targetRealmPath)) {
+            New-Item -Path $targetRealmPath -ItemType Directory -Force
+            Write-Output "Created target realm directory: $targetRealmPath"
           }
 
       - name: Download Allocation Export File
@@ -101,10 +97,44 @@ jobs:
             Write-Output "Using existing allocation export file from workflow artifact for import"
             $exportFound = $true
           } else {
-            Write-Output "No exported tables artifact found, checking realm repository..."
+            Write-Output "No exported tables artifact found, checking test realm directory..."
             
-            # Check if the file exists in the realm repository
-            $sourcePath = "realms-repo/realms/${{ inputs.source_realm }}/allocation_export"
+            # Check if the file exists in our test realm directory
+            $sourcePath = "test-realms/${{ inputs.source_realm }}/allocation_export"
+            
+            if (!(Test-Path $sourcePath)) {
+              # For testing - create mock data if not available
+              Write-Output "Creating mock data for testing since no export found..."
+              New-Item -Path $sourcePath -ItemType Directory -Force
+              
+              # Create sample allocation data files
+              @"
+              {
+                "id": "alloc1",
+                "name": "Test Allocation 1",
+                "planningInstanceId": "${{ inputs.planningInstanceId }}",
+                "status": "ACTIVE"
+              }
+              "@ | Out-File -FilePath "$sourcePath/allocations.json" -Encoding utf8
+              
+              @"
+              {
+                "id": "res1",
+                "name": "Resource 1",
+                "type": "HUMAN"
+              }
+              "@ | Out-File -FilePath "$sourcePath/resources.json" -Encoding utf8
+              
+              @"
+              {
+                "id": "map1",
+                "allocationId": "alloc1",
+                "resourceId": "res1",
+                "percentage": 50
+              }
+              "@ | Out-File -FilePath "$sourcePath/resource_maps.json" -Encoding utf8
+            }
+            
             if (Test-Path $sourcePath) {
               # Check if there are any files in the directory
               $files = Get-ChildItem -Path $sourcePath -File -Recurse
@@ -122,7 +152,7 @@ jobs:
                 # Clean up temp directory
                 Remove-Item -Path "temp-export" -Recurse -Force
                 
-                Write-Output "Created allocation import package from repository"
+                Write-Output "Created allocation import package from test repository"
                 $exportFound = $true
               } else {
                 Write-Output "Export directory exists but contains no files for realm ${{ inputs.source_realm }}"
@@ -140,33 +170,46 @@ jobs:
             echo "export_found=true" >> $env:GITHUB_OUTPUT
           }
 
-      - name: Import Allocation Data
+      - name: Mock Import Allocation Data
         run: |
-          # Get service access token (implement your auth method here)
-          $token = "YOUR_ACCESS_TOKEN"  # Replace with actual token acquisition
+          # Create target directory if it doesn't exist
+          $targetDir = "test-realms/${{ inputs.target_realm }}/allocation_import"
+          New-Item -Path $targetDir -ItemType Directory -Force
           
-          # Call the import API
-          $importCommand = "curl -X POST -H 'Authorization: Bearer $token' --form 'file=@allocation-import.zip' --form 'planningInstanceId=${{ inputs.planningInstanceId }}'"
+          # Extract the zip file to the target directory
+          Expand-Archive -Path "allocation-import.zip" -DestinationPath $targetDir -Force
           
-          $importCommand += " '${{ secrets.SERVICE_BASE_URL }}/api/v1/allocation/import-db-records'"
+          # List the imported files
+          $importedFiles = Get-ChildItem -Path $targetDir -Recurse -File
+          Write-Output "Imported $($importedFiles.Count) files to target realm ${{ inputs.target_realm }}:"
           
-          Write-Output "Executing import command: $importCommand"
-          $importResult = Invoke-Expression $importCommand
-          
-          # Parse and check results
-          Write-Output "Import result: $importResult"
-          
-          # Convert the JSON result to a PowerShell object
-          $importResultObj = $importResult | ConvertFrom-Json
-          
-          if ($importResultObj.status -ne "SUCCESS") {
-            Write-Error "Import failed: $($importResultObj.message)"
-            exit 1
+          foreach ($file in $importedFiles) {
+            Write-Output "  - $($file.Name)"
           }
           
-          Write-Output "Allocation data successfully imported to realm ${{ inputs.target_realm }}"
+          # Generate a mock import result
+          @"
+          {
+            "status": "SUCCESS",
+            "message": "Mock import completed successfully",
+            "itemsImported": $($importedFiles.Count),
+            "targetRealm": "${{ inputs.target_realm }}",
+            "planningInstanceId": "${{ inputs.planningInstanceId }}"
+          }
+          "@ | Out-File -FilePath "import-result.json" -Encoding utf8
+          
+          Write-Output "Mock allocation data successfully imported to realm ${{ inputs.target_realm }}"
         
       - name: Verify Import Results
         run: |
-          Write-Output "Allocation data has been deployed to realm ${{ inputs.target_realm }}"
-          Write-Output "Use the allocation service API to verify the data was imported correctly"
+          if (Test-Path "import-result.json") {
+            $importResult = Get-Content "import-result.json" | ConvertFrom-Json
+            Write-Output "Import status: $($importResult.status)"
+            Write-Output "Message: $($importResult.message)"
+            Write-Output "Items imported: $($importResult.itemsImported)"
+          } else {
+            Write-Output "No import result file found"
+          }
+          
+          Write-Output "Allocation data has been deployed to test realm ${{ inputs.target_realm }}"
+          Write-Output "Files are located in test-realms/${{ inputs.target_realm }}/allocation_import"
