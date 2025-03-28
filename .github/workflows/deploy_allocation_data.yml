@@ -80,13 +80,30 @@ jobs:
 
       - name: Check for Downloaded Artifact
         run: |
-          Write-Output "Checking for downloaded artifact in ./artifact-download/"
-          if (Test-Path "./artifact-download/exported-tables.zip") {
-            Write-Output "Found artifact downloaded from previous workflow"
-            Copy-Item "./artifact-download/exported-tables.zip" -Destination "allocation-import.zip" -Force
+          Write-Output "Checking for artifacts..."
+          
+          # Create the download directory if it doesn't exist
+          if (!(Test-Path "./artifact-download/")) {
+            New-Item -Path "./artifact-download/" -ItemType Directory -Force
+            Write-Output "Created artifact-download directory"
+          }
+          
+          # List all workflow runs to debug
+          Write-Output "Attempting to get workflow information:"
+          try {
+            # This won't work but we're illustrating the issue
+            Write-Output "This would be where we'd get workflow info if we had API access"
+          } catch {
+            Write-Output "Cannot access workflow API from within a workflow"
+          }
+          
+          Write-Output "Creating a test file to check file system access"
+          "Test content" | Out-File -FilePath "./artifact-download/test-file.txt"
+          
+          if (Test-Path "./artifact-download/test-file.txt") {
+            Write-Output "Successfully created test file in download directory"
           } else {
-            Write-Output "No artifact found in download directory"
-            Get-ChildItem -Path "./artifact-download/" -Recurse | ForEach-Object { Write-Output "Found: $_" }
+            Write-Output "Failed to create test file"
           }
 
       - name: Check for Allocation Export File
