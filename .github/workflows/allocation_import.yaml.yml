@@ -1,10 +1,10 @@
 name: Deploy Allocation Data
-run-name: Deploy Allocation Data for ${{ inputs.realm_name }}
+run-name: Deploy Allocation Data for ${{ inputs.target_realm }}
 on:
   workflow_dispatch:
     inputs:
-      environment_name:
-        description: "Specify which environment to use"
+      environment:
+        description: "Target environment"
         required: true
         type: choice
         options:
@@ -13,27 +13,35 @@ on:
           - psr
           - demo
         default: dev
-      realm_name:
-        description: "Target realm to deploy allocation data to"
+      source_realm:
+        description: "Source realm for reference (metadata only)"
         required: true
         type: string
-      planning_instance_id:
-        description: "Optional planning instance ID for ondemand data sources"
-        required: false
+      target_realm:
+        description: "Target realm to import data to"
+        required: true
+        type: string
+      planningInstanceId:
+        description: "Planning instance ID"
+        required: true
         type: string
   workflow_call:
     inputs:
-      environment_name:
-        description: "Specify which environment to use"
+      environment:
+        description: "Target environment"
         required: true
         type: string
-      realm_name:
-        description: "Target realm to deploy allocation data to"
+      source_realm:
+        description: "Source realm for reference (metadata only)"
         required: true
         type: string
-      planning_instance_id:
-        description: "Optional planning instance ID for ondemand data sources"
-        required: false
+      target_realm:
+        description: "Target realm to import data to"
+        required: true
+        type: string
+      planningInstanceId:
+        description: "Planning instance ID"
+        required: true
         type: string
 
 defaults:
@@ -42,8 +50,16 @@ defaults:
 jobs:
   Deploy_Allocation_Resources:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment_name }}
+    environment: ${{ inputs.environment }}
     steps:
+      - name: Echo Input Parameters
+        id: echo_input
+        run: |
+          Write-Output "Environment: [${{ inputs.environment }}]"
+          Write-Output "Source Realm: [${{ inputs.source_realm }}]"
+          Write-Output "Target Realm: [${{ inputs.target_realm }}]"
+          Write-Output "Planning Instance ID: [${{ inputs.planningInstanceId }}]"
+
       - name: Check out repository code
         uses: actions/checkout@v4.1.1
 
@@ -62,70 +78,75 @@ jobs:
 
       - name: Setup Realm Directory
         run: |
-          $realmPath = "realms-repo/realms/${{ inputs.realm_name }}"
+          $realmPath = "realms-repo/realms/${{ inputs.target_realm }}"
           if (!(Test-Path $realmPath)) {
             New-Item -Path $realmPath -ItemType Directory -Force
-            Write-Output "Created realm directory: $realmPath"
+            Write-Output "Created target realm directory: $realmPath"
           }
-          
-          if (!(Test-Path "$realmPath/realm_info")) {
-            New-Item -Path "$realmPath/realm_info" -ItemType Directory -Force
-            Write-Output "Created realm_info directory"
-          }
-
-      - name: Setup Realm Info
-        run: |
-          $realmInfoPath = "realms-repo/realms/${{ inputs.realm_name }}/realm_info/realm_info.json"
-          
-          if (!(Test-Path $realmInfoPath)) {
-            Write-Error "Realm info file not found at $realmInfoPath"
-            exit 1
-          }
-          
-          $realmInfo = Get-Content $realmInfoPath | ConvertFrom-Json
-          Write-Output "Realm: $($realmInfo.realm_name), ID: $($realmInfo.realm_id)"
 
       - name: Download Allocation Export File
         uses: actions/download-artifact@v4
         with:
-          name: allocation-export
+          name: allocation-export-${{ inputs.source_realm }}
           path: .
         continue-on-error: true
 
       - name: Check for Allocation Export File
+        id: check_export_file
         run: |
-          if (!(Test-Path "exported-tables.zip")) {
-            Write-Output "No exported tables artifact found, creating a new export file"
-            
-            # Here you would implement logic to create a new export file if needed
-            # This is just a placeholder - replace with your actual implementation
-            New-Item -Path "allocation-import.zip" -ItemType File -Force
-          } else {
+          $exportFound = $false
+          
+          if (Test-Path "exported-tables.zip") {
             Copy-Item "exported-tables.zip" -Destination "allocation-import.zip" -Force
-            Write-Output "Using existing allocation export file for import"
+            Write-Output "Using existing allocation export file from workflow artifact for import"
+            $exportFound = $true
+          } else {
+            Write-Output "No exported tables artifact found, checking realm repository..."
+            
+            # Check if the file exists in the realm repository
+            $sourcePath = "realms-repo/realms/${{ inputs.source_realm }}/allocation_export"
+            if (Test-Path $sourcePath) {
+              # Check if there are any files in the directory
+              $files = Get-ChildItem -Path $sourcePath -File -Recurse
+              
+              if ($files.Count -gt 0) {
+                # Create a temp directory for zipping
+                New-Item -Path "temp-export" -ItemType Directory -Force
+                
+                # Copy files to temp directory
+                Copy-Item -Path "$sourcePath/*" -Destination "temp-export/" -Recurse
+                
+                # Create zip file
+                Compress-Archive -Path "temp-export/*" -DestinationPath "allocation-import.zip" -Force
+                
+                # Clean up temp directory
+                Remove-Item -Path "temp-export" -Recurse -Force
+                
+                Write-Output "Created allocation import package from repository"
+                $exportFound = $true
+              } else {
+                Write-Output "Export directory exists but contains no files for realm ${{ inputs.source_realm }}"
+              }
+            } else {
+              Write-Output "No allocation export directory found for realm ${{ inputs.source_realm }}"
+            }
+          }
+          
+          if (!$exportFound) {
+            Write-Output "::warning::No allocation export data found for source realm ${{ inputs.source_realm }}. Please run the export workflow for this realm first."
+            echo "export_found=false" >> $env:GITHUB_OUTPUT
+            exit 1
+          } else {
+            echo "export_found=true" >> $env:GITHUB_OUTPUT
           }
 
       - name: Import Allocation Data
         run: |
-          # Get realm credentials
-          $realmInfoPath = "realms-repo/realms/${{ inputs.realm_name }}/realm_info/realm_info.json"
-          $realmInfo = Get-Content $realmInfoPath | ConvertFrom-Json
-          
-          # Prepare optional planning instance ID parameter
-          $planningInstanceParam = ""
-          if ("${{ inputs.planning_instance_id }}" -ne "") {
-            $planningInstanceParam = "--form 'planningInstanceId=${{ inputs.planning_instance_id }}'"
-          }
-          
           # Get service access token (implement your auth method here)
           $token = "YOUR_ACCESS_TOKEN"  # Replace with actual token acquisition
           
           # Call the import API
-          $importCommand = "curl -X POST -H 'Authorization: Bearer $token' --form 'file=@allocation-import.zip'"
-          
-          if ("${{ inputs.planning_instance_id }}" -ne "") {
-            $importCommand += " --form 'planningInstanceId=${{ inputs.planning_instance_id }}'"
-          }
+          $importCommand = "curl -X POST -H 'Authorization: Bearer $token' --form 'file=@allocation-import.zip' --form 'planningInstanceId=${{ inputs.planningInstanceId }}'"
           
           $importCommand += " '${{ secrets.SERVICE_BASE_URL }}/api/v1/allocation/import-db-records'"
           
@@ -143,9 +164,9 @@ jobs:
             exit 1
           }
           
-          Write-Output "Allocation data successfully imported to realm ${{ inputs.realm_name }}"
+          Write-Output "Allocation data successfully imported to realm ${{ inputs.target_realm }}"
         
       - name: Verify Import Results
         run: |
-          Write-Output "Allocation data has been deployed to realm ${{ inputs.realm_name }}"
+          Write-Output "Allocation data has been deployed to realm ${{ inputs.target_realm }}"
           Write-Output "Use the allocation service API to verify the data was imported correctly"
