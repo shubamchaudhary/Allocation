@@ -127,6 +127,18 @@ jobs:
           Write-Output "git commit -m 'Export allocation data for realm ${{ inputs.source_realm }}'"
           Write-Output "git push"
 
+      - name: List Files Before Upload
+        run: |
+          Write-Output "Files in current directory:"
+          Get-ChildItem -Path "." | ForEach-Object { Write-Output "  $($_.Name)" }
+          
+          if (Test-Path "exported-tables.zip") {
+            Write-Output "Zip file details:"
+            Get-Item "exported-tables.zip" | Select-Object FullName, Length, LastWriteTime
+          } else {
+            Write-Error "exported-tables.zip file not found before upload!"
+          }
+
       - name: Upload Exported Data as Artifact
         uses: actions/upload-artifact@v4.1.0
         with:

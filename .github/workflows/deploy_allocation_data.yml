@@ -75,15 +75,33 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: allocation-export-${{ inputs.source_realm }}
-          path: .
+          path: ./artifact-download/
         continue-on-error: true
+
+      - name: Check for Downloaded Artifact
+        run: |
+          Write-Output "Checking for downloaded artifact in ./artifact-download/"
+          if (Test-Path "./artifact-download/exported-tables.zip") {
+            Write-Output "Found artifact downloaded from previous workflow"
+            Copy-Item "./artifact-download/exported-tables.zip" -Destination "allocation-import.zip" -Force
+          } else {
+            Write-Output "No artifact found in download directory"
+            Get-ChildItem -Path "./artifact-download/" -Recurse | ForEach-Object { Write-Output "Found: $_" }
+          }
 
       - name: Check for Allocation Export File
         id: check_export_file
         run: |
           $exportFound = $false
           
-          if (Test-Path "exported-tables.zip") {
+          # First check for downloaded artifact
+          if (Test-Path "./artifact-download/exported-tables.zip") {
+            Copy-Item "./artifact-download/exported-tables.zip" -Destination "allocation-import.zip" -Force
+            Write-Output "Using downloaded artifact from previous workflow"
+            $exportFound = $true
+          }
+          # Then check in current directory (legacy path)
+          elseif (Test-Path "exported-tables.zip") {
             Copy-Item "exported-tables.zip" -Destination "allocation-import.zip" -Force
             Write-Output "Using existing allocation export file from workflow artifact for import"
             $exportFound = $true
