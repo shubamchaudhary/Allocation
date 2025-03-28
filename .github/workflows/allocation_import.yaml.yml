@@ -107,32 +107,32 @@ jobs:
               Write-Output "Creating mock data for testing since no export found..."
               New-Item -Path $sourcePath -ItemType Directory -Force
               
-              # Create sample allocation data files
-              @"
-              {
-                "id": "alloc1",
-                "name": "Test Allocation 1",
-                "planningInstanceId": "${{ inputs.planningInstanceId }}",
-                "status": "ACTIVE"
-              }
-              "@ | Out-File -FilePath "$sourcePath/allocations.json" -Encoding utf8
+              # Create sample allocation data files - fixing whitespace issue with here-string
+              @'
+{
+  "id": "alloc1",
+  "name": "Test Allocation 1",
+  "planningInstanceId": "${{ inputs.planningInstanceId }}",
+  "status": "ACTIVE"
+}
+'@ | Out-File -FilePath "$sourcePath/allocations.json" -Encoding utf8
               
-              @"
-              {
-                "id": "res1",
-                "name": "Resource 1",
-                "type": "HUMAN"
-              }
-              "@ | Out-File -FilePath "$sourcePath/resources.json" -Encoding utf8
+              @'
+{
+  "id": "res1",
+  "name": "Resource 1",
+  "type": "HUMAN"
+}
+'@ | Out-File -FilePath "$sourcePath/resources.json" -Encoding utf8
               
-              @"
-              {
-                "id": "map1",
-                "allocationId": "alloc1",
-                "resourceId": "res1",
-                "percentage": 50
-              }
-              "@ | Out-File -FilePath "$sourcePath/resource_maps.json" -Encoding utf8
+              @'
+{
+  "id": "map1",
+  "allocationId": "alloc1",
+  "resourceId": "res1",
+  "percentage": 50
+}
+'@ | Out-File -FilePath "$sourcePath/resource_maps.json" -Encoding utf8
             }
             
             if (Test-Path $sourcePath) {
@@ -187,16 +187,16 @@ jobs:
             Write-Output "  - $($file.Name)"
           }
           
-          # Generate a mock import result
-          @"
-          {
-            "status": "SUCCESS",
-            "message": "Mock import completed successfully",
-            "itemsImported": $($importedFiles.Count),
-            "targetRealm": "${{ inputs.target_realm }}",
-            "planningInstanceId": "${{ inputs.planningInstanceId }}"
-          }
-          "@ | Out-File -FilePath "import-result.json" -Encoding utf8
+          # Generate a mock import result - using single quotes for here-strings
+          @'
+{
+  "status": "SUCCESS",
+  "message": "Mock import completed successfully",
+  "itemsImported": $($importedFiles.Count),
+  "targetRealm": "${{ inputs.target_realm }}",
+  "planningInstanceId": "${{ inputs.planningInstanceId }}"
+}
+'@ | Out-File -FilePath "import-result.json" -Encoding utf8
           
           Write-Output "Mock allocation data successfully imported to realm ${{ inputs.target_realm }}"
         
