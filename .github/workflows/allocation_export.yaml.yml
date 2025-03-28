@@ -1,221 +1,146 @@
-name: Publish Allocation Data
-run-name: Publish Allocation Data for ${{ inputs.realmName }}
+name: Publish Allocation Data (Test Version)
+run-name: Test Publish Allocation Data for ${{ inputs.source_realm }}
 on:
   workflow_dispatch:
     inputs:
-      realmName:
-        type: string
-        description: Name of the LIAM Realm
+      environment:
+        description: "Target environment"
         required: true
-      realmId:
-        type: string
-        description: ID of the LIAM Realm
-        required: true
-      geography:
-        type: string
-        description: Environment Deployment Zone(eg. us, eu, apac)
-        required: true
-      size:
-        type: string
-        description: Environment Size
-        required: true
-      jpowerId:
-        required: true
-        type: string
-        description: JPowerID
-      customerId:
-        required: true
-        type: string
-        description: Realm Customer ID
-      envType:
-        required: true
-        description: Environment Type
         type: choice
-        default: dev
         options:
           - dev
           - interop
           - psr
           - demo
-      keyVaultURL:
+        default: dev
+      source_realm:
+        description: "Source realm to export data from"
         required: true
         type: string
-        description: Key Vault URL to get Client Credential
-        default: "https://allocation-key-vault.vault.azure.net"
-
+      target_realm:
+        description: "Target realm for reference (metadata only)"
+        required: true
+        type: string
+      planningInstanceId:
+        description: "Planning instance ID"
+        required: true
+        type: string
   workflow_call:
     inputs:
-      realmName:
-        type: string
-        description: Name of the LIAM Realm to export from
-        required: true
-      realmId:
-        type: string
-        description: ID of the LIAM Realm
-        required: true
-      geography:
-        type: string
-        description: Environment Deployment Zone
-        required: true
-      size:
-        type: string
-        description: Environment Size
-        required: true
-      jpowerId:
+      environment:
+        description: "Target environment"
         required: true
         type: string
-        description: JPowerID
-      customerId:
+      source_realm:
+        description: "Source realm to export data from"
         required: true
         type: string
-        description: Realm Customer ID
-      envType:
+      target_realm:
+        description: "Target realm for reference (metadata only)"
         required: true
         type: string
-        description: Environment Type
-      keyVaultURL:
+      planningInstanceId:
+        description: "Planning instance ID"
         required: true
         type: string
-        description: Key Vault URL to get Client Credential
 
 defaults:
   run:
     shell: pwsh
 jobs:
-  get_by_env:
-    runs-on: ubuntu-latest
-    outputs:
-      byenv: ${{ steps.get_by_env.outputs.byenv }}
-    steps:
-      - name: Get BY Env
-        id: get_by_env
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const geography = "${{ inputs.geography }}";
-            const envType = "${{ inputs.envType }}";
-            
-            let byenv = "";
-            if (geography === "us") {
-              if (envType === "Dev") byenv = "US-Dev";
-              else if (envType === "Non-Prod") byenv = "US-NonProd";
-              else if (envType === "Prod") byenv = "US-Prod";
-              else byenv = "US-Dev";
-            } else if (geography === "eu") {
-              if (envType === "Dev") byenv = "EU-Dev";
-              else if (envType === "Non-Prod") byenv = "EU-NonProd";
-              else if (envType === "Prod") byenv = "EU-Prod";
-              else byenv = "EU-Dev";
-            } else if (geography === "apac") {
-              if (envType === "Dev") byenv = "APAC-Dev";
-              else if (envType === "Non-Prod") byenv = "APAC-NonProd";
-              else if (envType === "Prod") byenv = "APAC-Prod";
-              else byenv = "APAC-Dev";
-            } else {
-              byenv = "US-Dev";
-            }
-            
-            console.log(`Setting byenv to: ${byenv}`);
-            return byenv;
-      - name: Echo Output
-        id: echo_output
-        run: |
-          Write-Output ${{ steps.get_by_env.outputs.byenv }}
-
   Publish_Allocation_Resources:
     runs-on: ubuntu-latest
-    needs: get_by_env
-    environment: ${{ needs.get_by_env.outputs.byenv }}
+    # No actual environment needed for testing
+    # environment: ${{ inputs.environment }}
     steps:
-      - name: Echo Input
+      - name: Echo Input Parameters
         id: echo_input
         run: |
-          Write-Output "realmName: [${{ inputs.realmName }}]"
-          Write-Output "realmId: [${{ inputs.realmId }}]"
-          Write-Output "geography: [${{ inputs.geography }}]"
-          Write-Output "envType: [${{ inputs.envType }}]"
-          Write-Output "size: [${{ inputs.size }}]"
-          Write-Output "jpowerId: [${{ inputs.jpowerId }}]"
-          Write-Output "customerId: [${{ inputs.customerId }}]"
-          Write-Output "Key Vault Name: [${{ inputs.keyVaultURL }}]"
+          Write-Output "Environment: [${{ inputs.environment }}]"
+          Write-Output "Source Realm: [${{ inputs.source_realm }}]"
+          Write-Output "Target Realm: [${{ inputs.target_realm }}]"
+          Write-Output "Planning Instance ID: [${{ inputs.planningInstanceId }}]"
 
       - name: Check out repository code
         uses: actions/checkout@v4.1.1
 
-      - name: Setup Java JDK
-        uses: actions/setup-java@v3.13.0
-        with:
-          distribution: "temurin"
-          java-version: "17"
+      # Skipping JDK setup for test version
+      # - name: Setup Java JDK
+      #   uses: actions/setup-java@v3.13.0
+      #   with:
+      #     distribution: "temurin"
+      #     java-version: "17"
 
-      - name: Create Realm Credential
+      # Using the current repository instead of a private one
+      - name: Setup Testing Directory
+        id: setup_test_dir
         run: |
-          # Get client credentials from key vault
-          $clientId = az keyvault secret show --vault-name ${{ inputs.keyVaultURL }} --name "CLIENT-ID" --query value -o tsv
-          $clientSecret = az keyvault secret show --vault-name ${{ inputs.keyVaultURL }} --name "CLIENT-SECRET" --query value -o tsv
+          New-Item -Force -Path "test-realms/${{ inputs.source_realm }}/allocation_export" -Type Directory 
+          Write-Output "Created folder structure for source realm ${{ inputs.source_realm }}"
+
+      - name: Mock Export Allocation Data
+        run: |
+          # Create mock data files
+          New-Item -Path "mock-data" -ItemType Directory -Force
           
-          # Create or update credential file for the realm
-          $credentialJson = @{
-            "realm_name" = "${{ inputs.realmName }}"
-            "realm_id" = "${{ inputs.realmId }}"
-            "customer_id" = "${{ inputs.customerId }}"
-            "jpower_id" = "${{ inputs.jpowerId }}"
-            "client_id" = "$clientId"
-            "client_secret" = "$clientSecret"
-            "geography" = "${{ inputs.geography }}"
-            "size" = "${{ inputs.size }}"
-            "env_type" = "${{ inputs.envType }}"
-          } | ConvertTo-Json
+          # Create sample allocation data files
+          @"
+          {
+            "id": "alloc1",
+            "name": "Test Allocation 1",
+            "planningInstanceId": "${{ inputs.planningInstanceId }}",
+            "status": "ACTIVE"
+          }
+          "@ | Out-File -FilePath "mock-data/allocations.json" -Encoding utf8
           
-          $credentialJson | Out-File -FilePath "${{ inputs.realmName }}.json" -Encoding utf8
-
-      - name: Check out Realm Repository
-        uses: actions/checkout@v4.1.1
-        with:
-          repository: 'BY-Product-Development/plan-calloc-realms'
-          token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
-          path: 'realms-repo'
-
-      - name: Setup Realm Folder
-        id: setup_realm_folder
-        run: |
-          New-Item -Force -Path "realms-repo/realms/${{ inputs.realmName }}/allocation_export" -Type Directory 
-          Copy-Item -Force "${{ inputs.realmName }}.json" -Destination "realms-repo/realms/${{ inputs.realmName }}/realm_info/realm_info.json"
-
-      - name: Export Allocation Data
-        run: |
-          # Call the API endpoint to export allocation data
-          $headers = @{
-            "Content-Type" = "application/json"
-            "Authorization" = "Bearer $token"  # Replace with your auth mechanism
+          @"
+          {
+            "id": "res1",
+            "name": "Resource 1",
+            "type": "HUMAN"
+          }
+          "@ | Out-File -FilePath "mock-data/resources.json" -Encoding utf8
+          
+          @"
+          {
+            "id": "map1",
+            "allocationId": "alloc1",
+            "resourceId": "res1",
+            "percentage": 50
+          }
+          "@ | Out-File -FilePath "mock-data/resource_maps.json" -Encoding utf8
+          
+          # Create a zip file
+          Compress-Archive -Path "mock-data/*" -DestinationPath "exported-tables.zip" -Force
+          
+          # Verify the export file was created
+          if (!(Test-Path "exported-tables.zip")) {
+            Write-Error "Failed to create mock allocation data - exported-tables.zip not created"
+            exit 1
           }
           
-          # Using direct curl command for the download
-          curl -L -o "exported-tables.zip" `
-            -H "Authorization: Bearer $token" `
-            "${{ secrets.SERVICE_BASE_URL }}/api/v1/allocation/export-db-records"
-          
-          # Unzip to check contents
-          Expand-Archive -Path "exported-tables.zip" -DestinationPath "temp-export" -Force
+          Write-Output "Successfully created mock allocation data for realm ${{ inputs.source_realm }}"
           
           # Copy files to realm repository
-          Copy-Item -Force -Recurse "temp-export/*" -Destination "realms-repo/realms/${{ inputs.realmName }}/allocation_export/"
+          Copy-Item -Force -Recurse "mock-data/*" -Destination "test-realms/${{ inputs.source_realm }}/allocation_export/"
           
           # Clean up
-          Remove-Item -Recurse -Force "temp-export"
+          Remove-Item -Recurse -Force "mock-data"
 
-      - name: Commit and Push Changes
+      - name: Mock Commit and Push Changes
         run: |
-          cd realms-repo
-          git config user.name "GitHub Action"
-          git config user.email "action@github.com"
-          git add .
-          git commit -m "Export allocation data for realm ${{ inputs.realmName }}"
-          git push
+          Write-Output "Simulating git operations:"
+          Write-Output "git config user.name 'GitHub Action'"
+          Write-Output "git config user.email 'action@github.com'"
+          Write-Output "git add test-realms/${{ inputs.source_realm }}/allocation_export/*"
+          Write-Output "git commit -m 'Export allocation data for realm ${{ inputs.source_realm }}'"
+          Write-Output "git push"
+          
+          # No actual git operations for testing
 
       - name: Upload Exported Data as Artifact
         uses: actions/upload-artifact@v4.1.0
         with:
-          name: allocation-export
+          name: allocation-export-${{ inputs.source_realm }}
           path: exported-tables.zip
-          retention-days: 30
+          retention-days: 1  # Short retention for testing
