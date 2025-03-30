@@ -1,0 +1,185 @@
+name: Allocation Import/Export via ALM
+run-name: ${{ inputs.operation_type }} for ${{ inputs.source_environment }} ${{ inputs.operation_type == 'Export' && '→' || 'from' }} ${{ inputs.target_environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation_type:
+        description: "Operation to perform"
+        required: true
+        type: choice
+        options:
+          - "Export"
+          - "Import"
+          - "Export and Import"
+        default: "Export and Import"
+      source_environment:
+        description: "Source environment (export from)"
+        required: true
+        type: environment
+      target_environment:
+        description: "Target environment (import to)"
+        required: true
+        type: environment
+      planning_instance_id:
+        description: "Planning Instance ID (required)"
+        required: true
+        type: string
+      identity_context:
+        description: "Identity Context (required)"
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  export_data:
+    if: inputs.operation_type == 'Export' || inputs.operation_type == 'Export and Import'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.source_environment }}
+    outputs:
+      export_file_path: ${{ steps.execute_export.outputs.export_file_path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.1.1
+        
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3.13.0
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          
+      - name: Get access token for Source Environment
+        uses: BY-Product-Development/ds-github-actions/by-m2m-api-aquire-token@fc3723aeb1612faefd8f98251fbd4e93f4a5e75a
+        id: source_token_step
+        with:
+          client-id: ${{ secrets.REALM_CLIENT_ID }}
+          client-secret: ${{ secrets.REALM_CLIENT_SECRET }}
+          token-url: ${{ secrets.REALM_TOKEN_URL }}
+          scope: ${{ secrets.REALM_SCOPE }}
+      
+      - name: Execute Export
+        id: execute_export
+        run: |
+          $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+          $exportFileName = "allocation_export_${{ inputs.source_environment }}_${timestamp}.zip"
+          $outputPath = Join-Path $env:GITHUB_WORKSPACE $exportFileName
+          
+          Write-Host "Exporting allocation data from ${{ inputs.source_environment }} to $outputPath"
+          
+          # Make API call to export endpoint
+          $headers = @{
+            "Authorization" = "Bearer ${{ steps.source_token_step.outputs.access-token }}"
+            "Accept" = "*/*"
+            "planningInstanceId" = "${{ inputs.planning_instance_id }}"
+            "identity-context" = "${{ inputs.identity_context }}"
+          }
+          
+          try {
+            # The export API endpoint URL from your AllocationDataBaseExportController
+            $exportUrl = "${{ secrets.REALM_BASE_URL }}/api/v1/allocation/export-db-records"
+            
+            # Execute the export request and save the response to a file
+            Invoke-WebRequest -Uri $exportUrl -Headers $headers -Method GET -OutFile $outputPath
+            
+            if (Test-Path $outputPath) {
+              Write-Host "Export successful: $outputPath"
+              echo "export_file_path=$exportFileName" >> $env:GITHUB_OUTPUT
+            } else {
+              throw "Export file not created"
+            }
+          } catch {
+            Write-Error "Export failed: $_"
+            exit 1
+          }
+      
+      - name: Upload export file as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: allocation-export-file
+          path: ${{ steps.execute_export.outputs.export_file_path }}
+          retention-days: 1
+
+  import_data:
+    if: inputs.operation_type == 'Import' || inputs.operation_type == 'Export and Import'
+    needs: [export_data]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.1.1
+        
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3.13.0
+        with:
+          distribution: "temurin"
+          java-version: "17"
+      
+      - name: Download export file
+        uses: actions/download-artifact@v4
+        with:
+          name: allocation-export-file
+          path: .
+      
+      - name: Get access token for Target Environment
+        uses: BY-Product-Development/ds-github-actions/by-m2m-api-aquire-token@fc3723aeb1612faefd8f98251fbd4e93f4a5e75a
+        id: target_token_step
+        with:
+          client-id: ${{ secrets.REALM_CLIENT_ID }}
+          client-secret: ${{ secrets.REALM_CLIENT_SECRET }}
+          token-url: ${{ secrets.REALM_TOKEN_URL }}
+          scope: ${{ secrets.REALM_SCOPE }}
+      
+      - name: Execute Import
+        run: |
+          # Get the export file path
+          $exportFilePath = if ("${{ inputs.operation_type }}" -eq "Import") {
+            # For direct import, find the first zip file
+            Get-ChildItem -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
+          } else {
+            # For export and import, use the file from the export job
+            "${{ needs.export_data.outputs.export_file_path }}"
+          }
+          
+          if (-not (Test-Path $exportFilePath)) {
+            Write-Error "Export file not found: $exportFilePath"
+            exit 1
+          }
+          
+          Write-Host "Importing allocation data to ${{ inputs.target_environment }} from $exportFilePath"
+          
+          # The import API endpoint URL from your AllocationDataBaseImportController
+          $importUrl = "${{ secrets.REALM_BASE_URL }}/api/v1/allocation/import-db-records"
+          
+          try {
+            # Build form data for multipart/form-data upload
+            $fileBytes = [System.IO.File]::ReadAllBytes($exportFilePath)
+            $fileContent = [System.Net.Http.ByteArrayContent]::new($fileBytes)
+            
+            $form = [System.Net.Http.MultipartFormDataContent]::new()
+            $form.Add($fileContent, "file", [System.IO.Path]::GetFileName($exportFilePath))
+            
+            # Create HttpClient
+            $client = [System.Net.Http.HttpClient]::new()
+            $client.DefaultRequestHeaders.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new("Bearer", "${{ steps.target_token_step.outputs.access-token }}")
+            
+            # Add the required headers
+            $client.DefaultRequestHeaders.Add("planningInstanceId", "${{ inputs.planning_instance_id }}")
+            $client.DefaultRequestHeaders.Add("identity-context", "${{ inputs.identity_context }}")
+            
+            # Send request
+            $response = $client.PostAsync($importUrl, $form).GetAwaiter().GetResult()
+            
+            if ($response.IsSuccessStatusCode) {
+              $respContent = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              Write-Host "Import successful: $respContent"
+            } else {
+              $errorContent = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+              throw "Import failed with status $($response.StatusCode): $errorContent"
+            }
+          } catch {
+            Write-Error "Import failed: $_"
+            exit 1
+          }
