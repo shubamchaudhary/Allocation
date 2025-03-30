@@ -1,0 +1,96 @@
+name: ALMv2 Deploy BDM
+run-name: Deploy BDM for ${{ inputs.environment_name }} and [${{ inputs.template_name }}]
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: "Specify which environment to use"
+        required: true
+        type: environment
+      template_name:
+        description: "The Template Name."
+        required: false
+        type: choice
+        options:
+          - NONE
+          - cdp_base
+          - cdsp_base
+          - cbp_game
+          - cbp_io_base
+          - cmfp
+          - cmfp_base
+          - cmfp_e2e_golden
+          - cmfp_softline
+          - consumer_industries
+          - crp_base
+          - ibp_base
+          - ibp_ca_base
+          - ibp_offer_base
+          - idsp_base
+          - crp_cso_base
+          - crp_cso_base_2024_4
+          - cdaar_base
+          - car-base-v1
+          - car-base-v2
+          - car-base-v3
+          - car-base-v4
+          - car-base-v5
+          - car-base-v6
+          - car-base-v7
+          - cbp_cog_seg
+        default: NONE
+
+  workflow_call:
+    inputs:
+      environment_name:
+        description: "Specify which environment to use"
+        required: true
+        type: string
+      template_name:
+        description: "The Source Template Name."
+        required: false
+        type: string
+        default: NONE
+
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  Deploy_BDM_Resources:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4.1.1
+
+      - name: Check out Realm Repository
+        uses: ./.github/actions/checkout_realm_repository
+        with:
+          automation_token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
+
+      - name: Apply Template
+        uses: ./.github/actions/apply_template
+        with:
+          environment_name: ${{ inputs.environment_name }}
+          template_name: ${{ inputs.template_name }}
+
+      - name: Setting up BY Script
+        uses: ./.github/actions/setup_by_script
+
+      - name: Setting up Credential Files.
+        uses: ./.github/actions/setup_credential_files
+        with:
+          snowflake_private_key: ${{ secrets.SNOWFLAKE_SECURITY_ADMIN_PRIVATE_KEY }}
+          snowflake_environment: ${{ secrets.SNOWFLAKE_SECURITY_ADMIN_CONTEXT }}
+          realm_credential: ${{ secrets.REALM_INFO }}
+
+      - name: Deploy BDM for ${{ inputs.environment_name }}
+        shell: pwsh
+        run: |
+          almv2_deploy`
+            --logger-config logging.yaml `
+            almv2-deploy `
+            --realm-credential realm_credential.json `
+            --realm-info realms/${{ inputs.environment_name }}/realm_info/realm_info.json `
+            --input-folder realms/${{ inputs.environment_name }}/alm_resource_info/bdm `
+            --starting-step-name BDM
