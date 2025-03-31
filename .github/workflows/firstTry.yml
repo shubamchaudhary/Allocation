@@ -1,29 +1,24 @@
-name: Allocation Data Transfer
-run-name: Transfer Allocation Data from ${{ inputs.sourceRealmName }} to ${{ inputs.targetRealmName }}
+name: Transfer Allocation Database Records
+run-name: Transfer from ${{ inputs.source_realm_name }} to ${{ inputs.target_realm_name }}
 on:
   workflow_dispatch:
     inputs:
-      sourceRealmName:
+      source_realm_id:
+        description: "Source Realm ID"
+        required: true
         type: string
-        description: Name of the source LIAM Realm
+      source_realm_name:
+        description: "Source Realm Name"
         required: true
-      sourceRealmId:
         type: string
-        description: ID of the source LIAM Realm
+      source_geography:
+        description: "Source Geography (e.g., us, eu, apac)"
         required: true
-      targetRealmName:
         type: string
-        description: Name of the target LIAM Realm
+      source_env_type:
+        description: "Source Environment Type"
         required: true
-      targetRealmId:
-        type: string
-        description: ID of the target LIAM Realm
-        required: true
-      envType:
-        required: true
-        description: Environment Type (Demo⇒pldena,PSR⇒pltpsr,Pilot⇒plpprvna,Non-Prod⇒plpstgna,Prod⇒plp##,Dev⇒pltna)
         type: choice
-        default: Dev
         options:
           - Demo
           - PSR
@@ -31,174 +26,278 @@ on:
           - Non-Prod
           - Prod
           - Dev
-      keyVaultURL:
+          - Test
+      target_realm_id:
+        description: "Target Realm ID"
         required: true
         type: string
-        description: Key Vault URL to get Client Credential
+      target_realm_name:
+        description: "Target Realm Name"
+        required: true
+        type: string
+      target_geography:
+        description: "Target Geography (e.g., us, eu, apac)"
+        required: true
+        type: string
+      target_env_type:
+        description: "Target Environment Type"
+        required: true
+        type: choice
+        options:
+          - Demo
+          - PSR
+          - Pilot
+          - Non-Prod
+          - Prod
+          - Dev
+          - Test
+      key_vault_url:
+        description: "Key Vault URL to get Client Credential"
+        required: true
+        type: string
         default: "https://o67wh6yaleseujavasbb39k7.vault.azure.net"
-      startingStepName:
-        required: false
-        type: string
-        description: Optional Name of the step where the workflow needs to be started.
-        default: NONE
-
-  workflow_call:
-    inputs:
-      sourceRealmName:
-        type: string
-        description: Name of the source LIAM Realm
-        required: true
-      sourceRealmId:
-        type: string
-        description: ID of the source LIAM Realm
-        required: true
-      targetRealmName:
-        type: string
-        description: Name of the target LIAM Realm
-        required: true
-      targetRealmId:
-        type: string
-        description: ID of the target LIAM Realm
-        required: true
-      envType:
-        required: true
-        type: string
-        description: Environment Type
-      keyVaultURL:
-        required: true
-        type: string
-        description: Key Vault URL to get Client Credential
-      startingStepName:
-        required: false
-        type: string
-        description: Optional Name of the step where the workflow needs to be started.
-        default: NONE
 
 defaults:
   run:
     shell: pwsh
+
 jobs:
-  get_by_env:
+  get_source_by_env:
     runs-on: ubuntu-latest
     outputs:
-      byenv: ${{ steps.get_by_env.outputs.byenv }}
+      byenv: ${{ steps.get_source_by_env.outputs.byenv }}
     steps:
-      - name: Get BY Env
-        id: get_by_env
-        uses: ./.github/actions/get_by_env
+      - name: Check out repository code
+        uses: actions/checkout@v4.1.1
+        
+      - name: Get BY Env for Source
+        id: get_source_by_env
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/get_by_env@gha-latest
         with:
-          geography: ${{ inputs.geography }}
-          envType: ${{ inputs.envType }}
-      - name: Echo Output
-        id: echo_output
+          geography: ${{ inputs.source_geography }}
+          envType: ${{ inputs.source_env_type }}
+      
+      - name: Echo Source Output
+        id: echo_source_output
         run: |
-          Write-Output ${{ steps.get_by_env.outputs.byenv }}
+          Write-Output "Source BY Environment: ${{ steps.get_source_by_env.outputs.byenv }}"
 
-  transfer_allocation_data:
+  get_target_by_env:
     runs-on: ubuntu-latest
-    needs: get_by_env
-    environment: ${{ needs.get_by_env.outputs.byenv }}
+    outputs:
+      byenv: ${{ steps.get_target_by_env.outputs.byenv }}
     steps:
-      - name: Echo Input
-        id: echo_input
-        run: |
-          Write-Output "sourceRealmName: [${{ inputs.sourceRealmName }}]"
-          Write-Output "sourceRealmId: [${{ inputs.sourceRealmId }}]"
-          Write-Output "targetRealmName: [${{ inputs.targetRealmName }}]"
-          Write-Output "targetRealmId: [${{ inputs.targetRealmId }}]"
-          Write-Output "envType: [${{ inputs.envType }}]"
-          Write-Output "Key Vault Name: [${{ inputs.keyVaultURL }}]"
-          Write-Output "Starting Step Name: [${{ inputs.startingStepName }}]"
-
-      - name: Invoke Get Starting Step
-        id: get_step_value
-        uses: ./.github/actions/get_starting_step
+      - name: Check out repository code
+        uses: actions/checkout@v4.1.1
+        
+      - name: Get BY Env for Target
+        id: get_target_by_env
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/get_by_env@gha-latest
         with:
-          starting_step_name: ${{ inputs.startingStepName }}
+          geography: ${{ inputs.target_geography }}
+          envType: ${{ inputs.target_env_type }}
+      
+      - name: Echo Target Output
+        id: echo_target_output
+        run: |
+          Write-Output "Target BY Environment: ${{ steps.get_target_by_env.outputs.byenv }}"
 
+  Export_Source_Records:
+    runs-on: ubuntu-latest
+    needs: [get_source_by_env]
+    environment: ${{ needs.get_source_by_env.outputs.byenv }}
+    steps:
       - name: Check out repository code
         uses: actions/checkout@v4.1.1
 
       - name: Setting up BY Script
-        uses: ./.github/actions/setup_by_script
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_by_script@gha-latest
 
       - name: Create Source Realm Credential
-        uses: ./.github/actions/apply_aep_parameter
+        id: create_source_credential
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/apply_aep_parameter@gha-latest
         with:
           stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
           stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
-          realm_name: ${{ inputs.sourceRealmName }}
-          realm_id: ${{ inputs.sourceRealmId }}
-          env_type: ${{ inputs.envType }}
-          by_env: ${{ needs.get_by_env.outputs.byenv }}
-          key_vault_url: ${{ inputs.keyVaultURL }}
+          realm_name: ${{ inputs.source_realm_name }}
+          realm_id: ${{ inputs.source_realm_id }}
+          customer_id: ${{ secrets.CUSTOMER_ID }}
+          jpower_id: ${{ secrets.JPOWER_ID }}
+          env_type: ${{ inputs.source_env_type }}
+          geography: ${{ inputs.source_geography }}
+          size: "Standard"
+          costCenter: 474000
+          by_env: ${{ needs.get_source_by_env.outputs.byenv }}
+          key_vault_url: ${{ inputs.key_vault_url }}
           alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
           stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
           stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
-          output_file: source_realm_credential.json
 
-      - name: Create Target Realm Credential
-        uses: ./.github/actions/apply_aep_parameter
-        with:
-          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
-          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
-          realm_name: ${{ inputs.targetRealmName }}
-          realm_id: ${{ inputs.targetRealmId }}
-          env_type: ${{ inputs.envType }}
-          by_env: ${{ needs.get_by_env.outputs.byenv }}
-          key_vault_url: ${{ inputs.keyVaultURL }}
-          alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
-          stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
-          stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
-          output_file: target_realm_credential.json
-
-      - name: Check out Realm Repository
-        uses: ./.github/actions/checkout_realm_repository
-        with:
-          automation_token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
-
-      - name: Setup Source Realm Folder
-        id: setup_source_realm_folder
-        run: |
-          New-Item -Force -Path ${{ github.workspace }} -Name 'realms/${{ inputs.sourceRealmName }}/realm_info' -Type Directory 
-          Get-ChildItem ${{ github.workspace }}
-          Copy-Item -Force -Verbose realm_${{ inputs.sourceRealmName }}_info.json -Destination ${{ github.workspace }}/realms/${{ inputs.sourceRealmName }}/realm_info/realm_info.json
-
-      - name: Setup Target Realm Folder
-        id: setup_target_realm_folder
-        run: |
-          New-Item -Force -Path ${{ github.workspace }} -Name 'realms/${{ inputs.targetRealmName }}/realm_info' -Type Directory 
-          Get-ChildItem ${{ github.workspace }}
-          Copy-Item -Force -Verbose realm_${{ inputs.targetRealmName }}_info.json -Destination ${{ github.workspace }}/realms/${{ inputs.targetRealmName }}/realm_info/realm_info.json
-
-      - name: Create Credential Files
-        uses: ./.github/actions/setup_credential_files
+      - name: Create Credential
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_credential_files@gha-latest
         with:
           realm_credential: ${{ secrets.LIAM_CREDENTIAL }}
           snowflake_environment: ${{ secrets.SF_CONTEXT }}
           snowflake_private_key: ${{ secrets.SF_RSA_KEY }}
 
-      - name: Export Allocation Data
-        id: export_allocation_data
-        uses: ./.github/actions/export_allocation_data
-        with:
-          source_realm_name: ${{ inputs.sourceRealmName }}
-          source_realm_credential_path: source_realm_credential.json
-          output_folder: allocation_data
+      - name: Export Allocation DB Records
+        id: export_records
+        run: |
+          Write-Output "Starting export from realm ${{ inputs.source_realm_name }} (${{ inputs.source_realm_id }})"
+          
+          # Create temporary directory for the exported file
+          $exportDir = Join-Path -Path ${{ github.workspace }} -ChildPath "exported-records"
+          New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
+          $exportFilePath = Join-Path -Path $exportDir -ChildPath "exported-tables.zip"
+          
+          # Export using almv2_export tool
+          try {
+            # For now, using direct REST API call since we don't have the exact almv2 tool for allocation
+            # This would be replaced with the proper almv2 tool command once available
+            
+            # First try to get the credential file and extract necessary info
+            $realmCredFile = "${{ inputs.source_realm_name }}.postman_environment.json"
+            if (Test-Path $realmCredFile) {
+              $realmCred = Get-Content -Raw $realmCredFile | ConvertFrom-Json
+              $baseUrl = ($realmCred.values | Where-Object { $_.key -eq "baseUrl" }).value
+              $authToken = ($realmCred.values | Where-Object { $_.key -eq "authToken" }).value
+              
+              Write-Output "Using baseUrl: $baseUrl"
+              
+              # Make the API call to export
+              $headers = @{
+                "Authorization" = "Bearer $authToken"
+              }
+              
+              Invoke-RestMethod -Uri "$baseUrl/api/v1/allocation/export-db-records" -Headers $headers -Method GET -OutFile $exportFilePath
+              
+              if (Test-Path $exportFilePath) {
+                $fileSize = (Get-Item $exportFilePath).Length
+                Write-Output "Export file created successfully, size: $fileSize bytes"
+              } else {
+                throw "Export file was not created"
+              }
+            } else {
+              throw "Realm credential file not found: $realmCredFile"
+            }
+          } catch {
+            Write-Error "Export failed: $_"
+            exit 1
+          }
+          
+          # Store the file path for the next job
+          echo "::set-output name=export_dir::$exportDir"
+          echo "::set-output name=export_file::$exportFilePath"
 
-      - name: Import Allocation Data
-        id: import_allocation_data
-        uses: ./.github/actions/import_allocation_data
-        with:
-          target_realm_name: ${{ inputs.targetRealmName }}
-          target_realm_credential_path: target_realm_credential.json
-          input_file: allocation_data/exported_allocation_data.zip
-
-      - name: Upload Exported Data as Artifact
+      - name: Upload Exported Records
         uses: actions/upload-artifact@v4.6.0
         with:
-          name: allocation_data
-          path: |
-            ${{ github.workspace }}/allocation_data
-          overwrite: true
-          retention-days: 30
+          name: allocation-exported-records
+          path: ${{ steps.export_records.outputs.export_file }}
+          retention-days: 1
+
+  Import_Target_Records:
+    runs-on: ubuntu-latest
+    needs: [get_target_by_env, Export_Source_Records]
+    environment: ${{ needs.get_target_by_env.outputs.byenv }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4.1.1
+
+      - name: Setting up BY Script
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_by_script@gha-latest
+
+      - name: Create Target Realm Credential
+        id: create_target_credential
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/apply_aep_parameter@gha-latest
+        with:
+          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
+          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
+          realm_name: ${{ inputs.target_realm_name }}
+          realm_id: ${{ inputs.target_realm_id }}
+          customer_id: ${{ secrets.CUSTOMER_ID }}
+          jpower_id: ${{ secrets.JPOWER_ID }}
+          env_type: ${{ inputs.target_env_type }}
+          geography: ${{ inputs.target_geography }}
+          size: "Standard"
+          costCenter: 474000
+          by_env: ${{ needs.get_target_by_env.outputs.byenv }}
+          key_vault_url: ${{ inputs.key_vault_url }}
+          alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
+          stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
+          stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
+
+      - name: Create Credential
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_credential_files@gha-latest
+        with:
+          realm_credential: ${{ secrets.LIAM_CREDENTIAL }}
+          snowflake_environment: ${{ secrets.SF_CONTEXT }}
+          snowflake_private_key: ${{ secrets.SF_RSA_KEY }}
+
+      - name: Download Exported Records
+        uses: actions/download-artifact@v3
+        with:
+          name: allocation-exported-records
+          path: ${{ github.workspace }}/imported-records
+
+      - name: Import Allocation DB Records
+        run: |
+          Write-Output "Starting import to realm ${{ inputs.target_realm_name }} (${{ inputs.target_realm_id }})"
+          
+          # Get the exported file
+          $importFile = Get-ChildItem -Path "${{ github.workspace }}/imported-records" -Filter "exported-tables.zip" | Select-Object -First 1 -ExpandProperty FullName
+          
+          if (-not $importFile) {
+            Write-Error "Exported file not found"
+            exit 1
+          }
+          
+          Write-Output "Found export file: $importFile"
+          
+          # Import using the file
+          try {
+            # First try to get the credential file and extract necessary info
+            $realmCredFile = "${{ inputs.target_realm_name }}.postman_environment.json"
+            if (Test-Path $realmCredFile) {
+              $realmCred = Get-Content -Raw $realmCredFile | ConvertFrom-Json
+              $baseUrl = ($realmCred.values | Where-Object { $_.key -eq "baseUrl" }).value
+              $authToken = ($realmCred.values | Where-Object { $_.key -eq "authToken" }).value
+              
+              Write-Output "Using baseUrl: $baseUrl"
+              
+              # Prepare multipart form data for file upload
+              $fileBytes = [System.IO.File]::ReadAllBytes($importFile)
+              $boundary = [System.Guid]::NewGuid().ToString()
+              
+              $headers = @{
+                "Authorization" = "Bearer $authToken"
+                "Content-Type" = "multipart/form-data; boundary=$boundary"
+              }
+              
+              $LF = "`r`n"
+              $bodyLines = @(
+                "--$boundary",
+                "Content-Disposition: form-data; name=`"file`"; filename=`"exported-tables.zip`"",
+                "Content-Type: application/zip$LF"
+              )
+              
+              $body = [System.Text.Encoding]::UTF8.GetBytes(($bodyLines -join $LF))
+              $body += $fileBytes
+              $body += [System.Text.Encoding]::UTF8.GetBytes("$LF--$boundary--$LF")
+              
+              # Make the API call to import
+              $response = Invoke-RestMethod -Uri "$baseUrl/api/v1/allocation/import-db-records" -Method POST -Headers $headers -Body $body
+              Write-Output "Import completed successfully"
+              Write-Output "Response: $($response | ConvertTo-Json -Depth 4)"
+            } else {
+              throw "Realm credential file not found: $realmCredFile"
+            }
+          } catch {
+            Write-Error "Import failed: $_"
+            exit 1
+          }
+
+      - name: Cleanup
+        run: |
+          Remove-Item -Path "${{ github.workspace }}/imported-records" -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Output "Temporary files removed"
