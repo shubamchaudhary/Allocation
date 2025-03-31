@@ -52,10 +52,15 @@ on:
         type: string
         description: Key Vault URL to get Client Credential
         default: "https://o67wh6yaleseujavasbb39k7.vault.azure.net"
-      planningInstanceId:
+      source_planning_instance_id:
         required: false
         type: string
-        description: Planning Instance ID (required for certain operations)
+        description: Planning Instance ID for source realm
+        default: ""
+      target_planning_instance_id:
+        required: false
+        type: string
+        description: Planning Instance ID for target realm
         default: ""
 
 defaults:
@@ -97,7 +102,8 @@ jobs:
           Write-Output "JPower ID: [${{ inputs.jpowerId }}]"
           Write-Output "Customer ID: [${{ inputs.customerId }}]"
           Write-Output "Key Vault URL: [${{ inputs.keyVaultURL }}]"
-          Write-Output "Planning Instance ID: [${{ inputs.planningInstanceId }}]"
+          Write-Output "Source Planning Instance ID: [${{ inputs.source_planning_instance_id }}]"
+          Write-Output "Target Planning Instance ID: [${{ inputs.target_planning_instance_id }}]"
 
       - name: Check out repository code
         uses: actions/checkout@v4.1.1
@@ -168,10 +174,10 @@ jobs:
             "Content-Type" = "application/json"
           }
           
-          # Add planningInstanceId to headers if provided
-          if (-not [string]::IsNullOrEmpty('${{ inputs.planningInstanceId }}')) {
-            $headers.Add("planningInstanceId", "${{ inputs.planningInstanceId }}")
-            $headers.Add("identity-context", "${{ inputs.planningInstanceId }}")
+          # Add source planning instance ID to headers if provided
+          if (-not [string]::IsNullOrEmpty('${{ inputs.source_planning_instance_id }}')) {
+            $headers.Add("planningInstanceId", "${{ inputs.source_planning_instance_id }}")
+            $headers.Add("identity-context", "${{ inputs.source_planning_instance_id }}")
           }
           
           # Make the export API call
@@ -241,10 +247,10 @@ jobs:
             "Content-Type" = "multipart/form-data"
           }
           
-          # Add planningInstanceId to headers if provided
-          if (-not [string]::IsNullOrEmpty('${{ inputs.planningInstanceId }}')) {
-            $headers.Add("planningInstanceId", "${{ inputs.planningInstanceId }}")
-            $headers.Add("identity-context", "${{ inputs.planningInstanceId }}")
+          # Add target planning instance ID to headers if provided
+          if (-not [string]::IsNullOrEmpty('${{ inputs.target_planning_instance_id }}')) {
+            $headers.Add("planningInstanceId", "${{ inputs.target_planning_instance_id }}")
+            $headers.Add("identity-context", "${{ inputs.target_planning_instance_id }}")
           }
           
           # Make the import API call
@@ -260,8 +266,8 @@ jobs:
           -F "file=@$importFilePath"
           "@
           
-          if (-not [string]::IsNullOrEmpty('${{ inputs.planningInstanceId }}')) {
-            $curlCommand += ' -H "planningInstanceId: ${{ inputs.planningInstanceId }}" -H "identity-context: ${{ inputs.planningInstanceId }}"'
+          if (-not [string]::IsNullOrEmpty('${{ inputs.target_planning_instance_id }}')) {
+            $curlCommand += ' -H "planningInstanceId: ${{ inputs.target_planning_instance_id }}" -H "identity-context: ${{ inputs.target_planning_instance_id }}"'
           }
           
           Write-Output "Executing curl command for import"
