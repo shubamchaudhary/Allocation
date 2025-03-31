@@ -1,21 +1,21 @@
 name: Allocation Data Transfer
-run-name: Transfer Allocation Data from ${{ inputs.source_realm_name }} to ${{ inputs.target_realm_name }}
+run-name: Transfer Allocation Data from ${{ inputs.sourceRealmName }} to ${{ inputs.targetRealmName }}
 on:
   workflow_dispatch:
     inputs:
-      source_realm_name:
+      sourceRealmName:
         type: string
         description: Name of the source LIAM Realm
         required: true
-      source_realm_id:
+      sourceRealmId:
         type: string
         description: ID of the source LIAM Realm
         required: true
-      target_realm_name:
+      targetRealmName:
         type: string
         description: Name of the target LIAM Realm
         required: true
-      target_realm_id:
+      targetRealmId:
         type: string
         description: ID of the target LIAM Realm
         required: true
@@ -52,11 +52,73 @@ on:
         type: string
         description: Key Vault URL to get Client Credential
         default: "https://o67wh6yaleseujavasbb39k7.vault.azure.net"
+      planningInstanceId:
+        required: false
+        type: string
+        description: Optional Planning Instance ID for ondemand data source
+        default: ""
+      startingStepName:
+        required: false
+        type: string
+        description: Optional Name of the step where the workflow needs to be started.
+        default: NONE
+
+  workflow_call:
+    inputs:
+      sourceRealmName:
+        type: string
+        description: Name of the source LIAM Realm
+        required: true
+      sourceRealmId:
+        type: string
+        description: ID of the source LIAM Realm
+        required: true
+      targetRealmName:
+        type: string
+        description: Name of the target LIAM Realm
+        required: true
+      targetRealmId:
+        type: string
+        description: ID of the target LIAM Realm
+        required: true
+      geography:
+        type: string
+        description: Environment Deployment Zone
+        required: true
+      size:
+        type: string
+        description: Environment Size
+        required: true
+      jpowerId:
+        required: true
+        type: string
+        description: JPowerID
+      customerId:
+        required: true
+        type: string
+        description: Realm Customer ID
+      envType:
+        required: true
+        type: string
+        description: Environment Type
+      keyVaultURL:
+        required: true
+        type: string
+        description: Key Vault URL to get Client Credential
+      planningInstanceId:
+        required: false
+        type: string
+        description: Optional Planning Instance ID for ondemand data source
+        default: ""
+      startingStepName:
+        required: false
+        type: string
+        description: Optional Name of the step where the workflow needs to be started.
+        default: NONE
 
 defaults:
   run:
     shell: pwsh
-
 jobs:
   get_by_env:
     runs-on: ubuntu-latest
@@ -65,7 +127,7 @@ jobs:
     steps:
       - name: Get BY Env
         id: get_by_env
-        uses: BY-Product-Development/plan-abp-automation/.github/actions/get_by_env@gha-latest
+        uses: ./.github/actions/get_by_env
         with:
           geography: ${{ inputs.geography }}
           envType: ${{ inputs.envType }}
@@ -82,116 +144,120 @@ jobs:
       - name: Echo Input
         id: echo_input
         run: |
-          Write-Output "Source Realm Name: [${{ inputs.source_realm_name }}]"
-          Write-Output "Source Realm ID: [${{ inputs.source_realm_id }}]"
-          Write-Output "Target Realm Name: [${{ inputs.target_realm_name }}]"
-          Write-Output "Target Realm ID: [${{ inputs.target_realm_id }}]"
-          Write-Output "Geography: [${{ inputs.geography }}]"
-          Write-Output "Environment Type: [${{ inputs.envType }}]"
-          Write-Output "Size: [${{ inputs.size }}]"
-          Write-Output "JPower ID: [${{ inputs.jpowerId }}]"
-          Write-Output "Customer ID: [${{ inputs.customerId }}]"
-          Write-Output "Key Vault URL: [${{ inputs.keyVaultURL }}]"
-          Write-Output "Source Planning Instance ID: [${{ inputs.source_planning_instance_id }}]"
-          Write-Output "Target Planning Instance ID: [${{ inputs.target_planning_instance_id }}]"
+          Write-Output "sourceRealmName: [${{ inputs.sourceRealmName }}]"
+          Write-Output "sourceRealmId: [${{ inputs.sourceRealmId }}]"
+          Write-Output "targetRealmName: [${{ inputs.targetRealmName }}]"
+          Write-Output "targetRealmId: [${{ inputs.targetRealmId }}]"
+          Write-Output "geography: [${{ inputs.geography }}]"
+          Write-Output "envType: [${{ inputs.envType }}]"
+          Write-Output "size: [${{ inputs.size }}]"
+          Write-Output "costCenter: [474000]"
+          Write-Output "jpowerId: [${{ inputs.jpowerId }}]"
+          Write-Output "customerId: [${{ inputs.customerId }}]"
+          Write-Output "Key Vault Name: [${{ inputs.keyVaultURL }}]"
+          Write-Output "Planning Instance ID: [${{ inputs.planningInstanceId }}]"
+          Write-Output "Starting Step Name: [${{ inputs.startingStepName }}]"
+
+      - name: Invoke Get Starting Step
+        id: get_step_value
+        uses: ./.github/actions/get_starting_step
+        with:
+          starting_step_name: ${{ inputs.startingStepName }}
 
       - name: Check out repository code
         uses: actions/checkout@v4.1.1
 
       - name: Setting up BY Script
-        uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_by_script@gha-latest
+        uses: ./.github/actions/setup_by_script
 
-      - name: Check out Realm Repository
-        uses: BY-Product-Development/plan-abp-automation/.github/actions/checkout_realm_repository@gha-latest
+      - name: Create Source Realm Credential
+        uses: ./.github/actions/apply_aep_parameter
         with:
-          automation_token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
-
-      # Create folder for exported data
-      - name: Create Export Directory
-        run: |
-          New-Item -Force -Path ${{ github.workspace }} -Name 'allocation_export' -Type Directory
-
-      # Set up source realm
-      - name: Setup Source Realm
-        id: setup_source_realm
-        uses: ./.github/actions/setup-allocation-transfer
-        with:
-          realm_name: ${{ inputs.source_realm_name }}
-          realm_id: ${{ inputs.source_realm_id }}
+          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
+          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
+          realm_name: ${{ inputs.sourceRealmName }}
+          realm_id: ${{ inputs.sourceRealmId }}
           customer_id: ${{ inputs.customerId }}
           jpower_id: ${{ inputs.jpowerId }}
           env_type: ${{ inputs.envType }}
           geography: ${{ inputs.geography }}
           size: ${{ inputs.size }}
+          costCenter: 474000
           by_env: ${{ needs.get_by_env.outputs.byenv }}
           key_vault_url: ${{ inputs.keyVaultURL }}
-          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
-          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
           alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
           stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
           stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
-          workspace_path: ${{ github.workspace }}
+          output_file: source_realm_credential.json
+
+      - name: Create Target Realm Credential
+        uses: ./.github/actions/apply_aep_parameter
+        with:
+          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
+          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
+          realm_name: ${{ inputs.targetRealmName }}
+          realm_id: ${{ inputs.targetRealmId }}
+          customer_id: ${{ inputs.customerId }}
+          jpower_id: ${{ inputs.jpowerId }}
+          env_type: ${{ inputs.envType }}
+          geography: ${{ inputs.geography }}
+          size: ${{ inputs.size }}
+          costCenter: 474000
+          by_env: ${{ needs.get_by_env.outputs.byenv }}
+          key_vault_url: ${{ inputs.keyVaultURL }}
+          alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
+          stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
+          stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
+          output_file: target_realm_credential.json
+
+      - name: Check out Realm Repository
+        uses: ./.github/actions/checkout_realm_repository
+        with:
+          automation_token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
+
+      - name: Setup Source Realm Folder
+        id: setup_source_realm_folder
+        run: |
+          New-Item -Force -Path ${{ github.workspace }} -Name 'realms/${{ inputs.sourceRealmName }}/realm_info' -Type Directory 
+          Get-ChildItem ${{ github.workspace }}
+          Copy-Item -Force -Verbose realm_${{ inputs.sourceRealmName }}_info.json -Destination ${{ github.workspace }}/realms/${{ inputs.sourceRealmName }}/realm_info/realm_info.json
+
+      - name: Setup Target Realm Folder
+        id: setup_target_realm_folder
+        run: |
+          New-Item -Force -Path ${{ github.workspace }} -Name 'realms/${{ inputs.targetRealmName }}/realm_info' -Type Directory 
+          Get-ChildItem ${{ github.workspace }}
+          Copy-Item -Force -Verbose realm_${{ inputs.targetRealmName }}_info.json -Destination ${{ github.workspace }}/realms/${{ inputs.targetRealmName }}/realm_info/realm_info.json
 
       - name: Create Credential Files
-        uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_credential_files@gha-latest
+        uses: ./.github/actions/setup_credential_files
         with:
           realm_credential: ${{ secrets.LIAM_CREDENTIAL }}
           snowflake_environment: ${{ secrets.SF_CONTEXT }}
           snowflake_private_key: ${{ secrets.SF_RSA_KEY }}
 
-      # Export allocation data from source realm
       - name: Export Allocation Data
         id: export_allocation_data
-        uses: ./.github/actions/allocation-export
+        uses: ./.github/actions/export_allocation_data
         with:
-          realm_name: ${{ inputs.source_realm_name }}
-          realm_credential_path: ${{ steps.setup_source_realm.outputs.realm_credential_path }}
-          realm_info_path: ${{ steps.setup_source_realm.outputs.realm_info_path }}
-          output_path: ${{ github.workspace }}/allocation_export/exported-data.zip
+          source_realm_name: ${{ inputs.sourceRealmName }}
+          source_realm_credential_path: source_realm_credential.json
+          output_folder: allocation_data
 
-      # Store source realm credential for later use
-      - name: Backup Source Realm Credential
-        id: backup_source_credential
-        run: |
-          if (Test-Path "${{ steps.setup_source_realm.outputs.realm_credential_path }}") {
-            Copy-Item -Path "${{ steps.setup_source_realm.outputs.realm_credential_path }}" -Destination "${{ github.workspace }}/source_realm_credential.json"
-          }
-
-      # Set up target realm
-      - name: Setup Target Realm
-        id: setup_target_realm
-        uses: ./.github/actions/setup-allocation-transfer
-        with:
-          realm_name: ${{ inputs.target_realm_name }}
-          realm_id: ${{ inputs.target_realm_id }}
-          customer_id: ${{ inputs.customerId }}
-          jpower_id: ${{ inputs.jpowerId }}
-          env_type: ${{ inputs.envType }}
-          geography: ${{ inputs.geography }}
-          size: ${{ inputs.size }}
-          by_env: ${{ needs.get_by_env.outputs.byenv }}
-          key_vault_url: ${{ inputs.keyVaultURL }}
-          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
-          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
-          alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
-          stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
-          stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
-          workspace_path: ${{ github.workspace }}
-
-      # Import allocation data to target realm
       - name: Import Allocation Data
         id: import_allocation_data
-        uses: ./.github/actions/allocation-import
+        uses: ./.github/actions/import_allocation_data
         with:
-          realm_name: ${{ inputs.target_realm_name }}
-          realm_credential_path: ${{ steps.setup_target_realm.outputs.realm_credential_path }}
-          realm_info_path: ${{ steps.setup_target_realm.outputs.realm_info_path }}
-          input_file_path: ${{ github.workspace }}/allocation_export/exported-data.zip
+          target_realm_name: ${{ inputs.targetRealmName }}
+          target_realm_credential_path: target_realm_credential.json
+          input_file: allocation_data/exported_allocation_data.zip
+          planning_instance_id: ${{ inputs.planningInstanceId }}
 
-      # Upload exported data as artifact
-      - name: Upload Exported Data
+      - name: Upload Exported Data as Artifact
         uses: actions/upload-artifact@v4.6.0
         with:
-          name: allocation-exported-data
-          path: ${{ github.workspace }}/allocation_export
-          retention-days: 7
+          name: allocation_data
+          path: |
+            ${{ github.workspace }}/allocation_data
+          overwrite: true
+          retention-days: 30
