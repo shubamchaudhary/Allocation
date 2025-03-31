@@ -111,11 +111,21 @@ jobs:
       - name: Setting up BY Script
         uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_by_script@gha-latest
 
-      - name: Create Source Realm Credential
-        uses: BY-Product-Development/plan-abp-automation/.github/actions/apply_aep_parameter@gha-latest
+      - name: Check out Realm Repository
+        uses: BY-Product-Development/plan-abp-automation/.github/actions/checkout_realm_repository@gha-latest
         with:
-          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
-          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
+          automation_token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
+
+      # Create folder for exported data
+      - name: Create Export Directory
+        run: |
+          New-Item -Force -Path ${{ github.workspace }} -Name 'allocation_export' -Type Directory
+
+      # Set up source realm
+      - name: Setup Source Realm
+        id: setup_source_realm
+        uses: ./.github/actions/setup-allocation-transfer
+        with:
           realm_name: ${{ inputs.source_realm_name }}
           realm_id: ${{ inputs.source_realm_id }}
           customer_id: ${{ inputs.customerId }}
@@ -123,90 +133,45 @@ jobs:
           env_type: ${{ inputs.envType }}
           geography: ${{ inputs.geography }}
           size: ${{ inputs.size }}
-          costCenter: 474000
           by_env: ${{ needs.get_by_env.outputs.byenv }}
           key_vault_url: ${{ inputs.keyVaultURL }}
+          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
+          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
           alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
           stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
           stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
+          workspace_path: ${{ github.workspace }}
 
-      - name: Check out Realm Repository
-        uses: BY-Product-Development/plan-abp-automation/.github/actions/checkout_realm_repository@gha-latest
-        with:
-          automation_token: ${{ secrets.AUTOMATION_PAT_TOKEN }}
-
-      - name: Setup Source Realm Folder
-        id: setup_source_realm_folder
-        run: |
-          New-Item -Force -Path ${{ github.workspace }} -Name 'realms/${{ inputs.source_realm_name }}/realm_info' -Type Directory 
-          Get-ChildItem ${{ github.workspace }}
-          Copy-Item -Force -Verbose realm_${{ inputs.source_realm_name }}_info.json -Destination ${{ github.workspace }}/realms/${{ inputs.source_realm_name }}/realm_info/realm_info.json
-
-      - name: Create Source Realm Credential Files
+      - name: Create Credential Files
         uses: BY-Product-Development/plan-abp-automation/.github/actions/setup_credential_files@gha-latest
         with:
           realm_credential: ${{ secrets.LIAM_CREDENTIAL }}
           snowflake_environment: ${{ secrets.SF_CONTEXT }}
           snowflake_private_key: ${{ secrets.SF_RSA_KEY }}
 
-      # Create folder for exported data
-      - name: Create Export Directory
-        run: |
-          New-Item -Force -Path ${{ github.workspace }} -Name 'allocation_export' -Type Directory
-
       # Export allocation data from source realm
       - name: Export Allocation Data
         id: export_allocation_data
-        run: |
-          # Get authentication token from source realm credential
-          $realmCredential = Get-Content -Path ${{ inputs.source_realm_name }}.postman_environment.json | ConvertFrom-Json
-          $realmInfo = Get-Content -Path ${{ github.workspace }}/realms/${{ inputs.source_realm_name }}/realm_info/realm_info.json | ConvertFrom-Json
-          
-          # Extract base URL from realm info
-          $baseUrl = $realmInfo.baseUrl
-          
-          # Extract bearer token from realm credential
-          $bearerToken = $realmCredential.values | Where-Object { $_.key -eq "accessToken" } | Select-Object -ExpandProperty value
-          
-          # Set headers for API call
-          $headers = @{
-            "Authorization" = "Bearer $bearerToken"
-            "Content-Type" = "application/json"
-          }
-          
-          # Add source planning instance ID to headers if provided
-          if (-not [string]::IsNullOrEmpty('${{ inputs.source_planning_instance_id }}')) {
-            $headers.Add("planningInstanceId", "${{ inputs.source_planning_instance_id }}")
-            $headers.Add("identity-context", "${{ inputs.source_planning_instance_id }}")
-          }
-          
-          # Make the export API call
-          $exportUrl = "$baseUrl/api/v1/allocation/export-db-records"
-          $exportOutputPath = "${{ github.workspace }}/allocation_export/exported-data.zip"
-          
-          Write-Output "Exporting allocation data from $exportUrl"
-          Invoke-WebRequest -Uri $exportUrl -Headers $headers -Method GET -OutFile $exportOutputPath
-          
-          if (Test-Path $exportOutputPath) {
-            Write-Output "Successfully exported allocation data to $exportOutputPath"
-          } else {
-            throw "Failed to export allocation data"
-          }
-
-      # Create target realm credential
-      - name: Create Target Realm Credential
-        id: create_target_realm_credential
-        run: |
-          # Rename the source realm credential file temporarily
-          if (Test-Path "${{ inputs.source_realm_name }}.postman_environment.json") {
-            Rename-Item -Path "${{ inputs.source_realm_name }}.postman_environment.json" -NewName "source_realm_credential.json"
-          }
-
-      - name: Apply Target Realm Parameters
-        uses: BY-Product-Development/plan-abp-automation/.github/actions/apply_aep_parameter@gha-latest
+        uses: ./.github/actions/allocation-export
         with:
-          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
-          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
+          realm_name: ${{ inputs.source_realm_name }}
+          realm_credential_path: ${{ steps.setup_source_realm.outputs.realm_credential_path }}
+          realm_info_path: ${{ steps.setup_source_realm.outputs.realm_info_path }}
+          output_path: ${{ github.workspace }}/allocation_export/exported-data.zip
+
+      # Store source realm credential for later use
+      - name: Backup Source Realm Credential
+        id: backup_source_credential
+        run: |
+          if (Test-Path "${{ steps.setup_source_realm.outputs.realm_credential_path }}") {
+            Copy-Item -Path "${{ steps.setup_source_realm.outputs.realm_credential_path }}" -Destination "${{ github.workspace }}/source_realm_credential.json"
+          }
+
+      # Set up target realm
+      - name: Setup Target Realm
+        id: setup_target_realm
+        uses: ./.github/actions/setup-allocation-transfer
+        with:
           realm_name: ${{ inputs.target_realm_name }}
           realm_id: ${{ inputs.target_realm_id }}
           customer_id: ${{ inputs.customerId }}
@@ -214,78 +179,24 @@ jobs:
           env_type: ${{ inputs.envType }}
           geography: ${{ inputs.geography }}
           size: ${{ inputs.size }}
-          costCenter: 474000
           by_env: ${{ needs.get_by_env.outputs.byenv }}
           key_vault_url: ${{ inputs.keyVaultURL }}
+          stratosphere_client_id: ${{ secrets.SX_CBP_DEVOPS_CLIENT_ID }}
+          stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
           alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
           stratosphere_api_url: ${{ vars.STRATOSPHERE_API_URL }}
           stratosphere_auth_url: ${{ vars.STRATOSPHERE_AUTH_URL }}
-
-      - name: Setup Target Realm Folder
-        id: setup_target_realm_folder
-        run: |
-          New-Item -Force -Path ${{ github.workspace }} -Name 'realms/${{ inputs.target_realm_name }}/realm_info' -Type Directory 
-          Copy-Item -Force -Verbose realm_${{ inputs.target_realm_name }}_info.json -Destination ${{ github.workspace }}/realms/${{ inputs.target_realm_name }}/realm_info/realm_info.json
+          workspace_path: ${{ github.workspace }}
 
       # Import allocation data to target realm
       - name: Import Allocation Data
         id: import_allocation_data
-        run: |
-          # Get authentication token from target realm credential
-          $realmCredential = Get-Content -Path ${{ inputs.target_realm_name }}.postman_environment.json | ConvertFrom-Json
-          $realmInfo = Get-Content -Path ${{ github.workspace }}/realms/${{ inputs.target_realm_name }}/realm_info/realm_info.json | ConvertFrom-Json
-          
-          # Extract base URL from realm info
-          $baseUrl = $realmInfo.baseUrl
-          
-          # Extract bearer token from realm credential
-          $bearerToken = $realmCredential.values | Where-Object { $_.key -eq "accessToken" } | Select-Object -ExpandProperty value
-          
-          # Set headers for API call
-          $headers = @{
-            "Authorization" = "Bearer $bearerToken"
-            "Content-Type" = "multipart/form-data"
-          }
-          
-          # Add target planning instance ID to headers if provided
-          if (-not [string]::IsNullOrEmpty('${{ inputs.target_planning_instance_id }}')) {
-            $headers.Add("planningInstanceId", "${{ inputs.target_planning_instance_id }}")
-            $headers.Add("identity-context", "${{ inputs.target_planning_instance_id }}")
-          }
-          
-          # Make the import API call
-          $importUrl = "$baseUrl/api/v1/allocation/import-db-records"
-          $importFilePath = "${{ github.workspace }}/allocation_export/exported-data.zip"
-          
-          Write-Output "Importing allocation data to $importUrl"
-          
-          # Using curl to handle multipart/form-data properly
-          $curlCommand = @"
-          curl -X POST "$importUrl" \
-          -H "Authorization: Bearer $bearerToken" \
-          -F "file=@$importFilePath"
-          "@
-          
-          if (-not [string]::IsNullOrEmpty('${{ inputs.target_planning_instance_id }}')) {
-            $curlCommand += ' -H "planningInstanceId: ${{ inputs.target_planning_instance_id }}" -H "identity-context: ${{ inputs.target_planning_instance_id }}"'
-          }
-          
-          Write-Output "Executing curl command for import"
-          Invoke-Expression -Command $curlCommand
-          
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to import allocation data with exit code $LASTEXITCODE"
-          } else {
-            Write-Output "Successfully imported allocation data"
-          }
-
-      # Restore source realm credential for cleanup
-      - name: Restore Source Realm Credential
-        id: restore_source_credential
-        run: |
-          if (Test-Path "source_realm_credential.json") {
-            Rename-Item -Path "source_realm_credential.json" -NewName "${{ inputs.source_realm_name }}.postman_environment.json"
-          }
+        uses: ./.github/actions/allocation-import
+        with:
+          realm_name: ${{ inputs.target_realm_name }}
+          realm_credential_path: ${{ steps.setup_target_realm.outputs.realm_credential_path }}
+          realm_info_path: ${{ steps.setup_target_realm.outputs.realm_info_path }}
+          input_file_path: ${{ github.workspace }}/allocation_export/exported-data.zip
 
       # Upload exported data as artifact
       - name: Upload Exported Data
