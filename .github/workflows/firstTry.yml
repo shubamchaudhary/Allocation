@@ -19,22 +19,6 @@ on:
         type: string
         description: ID of the target LIAM Realm
         required: true
-      geography:
-        type: string
-        description: Environment Deployment Zone(eg. us, eu, apac)
-        required: true
-      size:
-        type: string
-        description: Environment Size(eg. Dev)
-        required: true
-      jpowerId:
-        required: true
-        type: string
-        description: JPowerID
-      customerId:
-        required: true
-        type: string
-        description: Realm Customer ID
       envType:
         required: true
         description: Environment Type (Demo⇒pldena,PSR⇒pltpsr,Pilot⇒plpprvna,Non-Prod⇒plpstgna,Prod⇒plp##,Dev⇒pltna)
@@ -52,11 +36,6 @@ on:
         type: string
         description: Key Vault URL to get Client Credential
         default: "https://o67wh6yaleseujavasbb39k7.vault.azure.net"
-      planningInstanceId:
-        required: false
-        type: string
-        description: Optional Planning Instance ID for ondemand data source
-        default: ""
       startingStepName:
         required: false
         type: string
@@ -81,22 +60,6 @@ on:
         type: string
         description: ID of the target LIAM Realm
         required: true
-      geography:
-        type: string
-        description: Environment Deployment Zone
-        required: true
-      size:
-        type: string
-        description: Environment Size
-        required: true
-      jpowerId:
-        required: true
-        type: string
-        description: JPowerID
-      customerId:
-        required: true
-        type: string
-        description: Realm Customer ID
       envType:
         required: true
         type: string
@@ -105,11 +68,6 @@ on:
         required: true
         type: string
         description: Key Vault URL to get Client Credential
-      planningInstanceId:
-        required: false
-        type: string
-        description: Optional Planning Instance ID for ondemand data source
-        default: ""
       startingStepName:
         required: false
         type: string
@@ -148,14 +106,8 @@ jobs:
           Write-Output "sourceRealmId: [${{ inputs.sourceRealmId }}]"
           Write-Output "targetRealmName: [${{ inputs.targetRealmName }}]"
           Write-Output "targetRealmId: [${{ inputs.targetRealmId }}]"
-          Write-Output "geography: [${{ inputs.geography }}]"
           Write-Output "envType: [${{ inputs.envType }}]"
-          Write-Output "size: [${{ inputs.size }}]"
-          Write-Output "costCenter: [474000]"
-          Write-Output "jpowerId: [${{ inputs.jpowerId }}]"
-          Write-Output "customerId: [${{ inputs.customerId }}]"
           Write-Output "Key Vault Name: [${{ inputs.keyVaultURL }}]"
-          Write-Output "Planning Instance ID: [${{ inputs.planningInstanceId }}]"
           Write-Output "Starting Step Name: [${{ inputs.startingStepName }}]"
 
       - name: Invoke Get Starting Step
@@ -177,12 +129,7 @@ jobs:
           stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
           realm_name: ${{ inputs.sourceRealmName }}
           realm_id: ${{ inputs.sourceRealmId }}
-          customer_id: ${{ inputs.customerId }}
-          jpower_id: ${{ inputs.jpowerId }}
           env_type: ${{ inputs.envType }}
-          geography: ${{ inputs.geography }}
-          size: ${{ inputs.size }}
-          costCenter: 474000
           by_env: ${{ needs.get_by_env.outputs.byenv }}
           key_vault_url: ${{ inputs.keyVaultURL }}
           alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
@@ -197,12 +144,7 @@ jobs:
           stratosphere_client_secret: ${{ secrets.SX_CBP_DEVOPS_CLIENT_SECRET }}
           realm_name: ${{ inputs.targetRealmName }}
           realm_id: ${{ inputs.targetRealmId }}
-          customer_id: ${{ inputs.customerId }}
-          jpower_id: ${{ inputs.jpowerId }}
           env_type: ${{ inputs.envType }}
-          geography: ${{ inputs.geography }}
-          size: ${{ inputs.size }}
-          costCenter: 474000
           by_env: ${{ needs.get_by_env.outputs.byenv }}
           key_vault_url: ${{ inputs.keyVaultURL }}
           alt_key_vault_name: ${{ vars.SX_CBP_DEVOPS_KV_NAME }}
@@ -251,7 +193,6 @@ jobs:
           target_realm_name: ${{ inputs.targetRealmName }}
           target_realm_credential_path: target_realm_credential.json
           input_file: allocation_data/exported_allocation_data.zip
-          planning_instance_id: ${{ inputs.planningInstanceId }}
 
       - name: Upload Exported Data as Artifact
         uses: actions/upload-artifact@v4.6.0
