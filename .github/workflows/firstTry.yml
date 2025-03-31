@@ -52,16 +52,6 @@ on:
         type: string
         description: Key Vault URL to get Client Credential
         default: "https://o67wh6yaleseujavasbb39k7.vault.azure.net"
-      source_planning_instance_id:
-        required: false
-        type: string
-        description: Planning Instance ID for source realm
-        default: ""
-      target_planning_instance_id:
-        required: false
-        type: string
-        description: Planning Instance ID for target realm
-        default: ""
 
 defaults:
   run:
